@@ -10,10 +10,12 @@ export function connectEngine(handlers: {
   onError?: (m: string) => void
 }): Socket {
   const socket = io('/?XTransformPort=3003', {
-    transports: ['websocket', 'polling'],
+    // polling first: works through both the Caddy gateway and the Next dev
+    // rewrite bridge; socket.io then upgrades to websocket automatically
+    transports: ['polling', 'websocket'],
     forceNew: true,
     reconnection: true,
-    reconnectionAttempts: 10,
+    reconnectionAttempts: 20,
     reconnectionDelay: 1000,
     timeout: 10000,
   })

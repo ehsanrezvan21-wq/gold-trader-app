@@ -4,6 +4,7 @@ import type { FullState, Tick } from '@/lib/trading-types'
 import { SYMBOL_LIST, SYMBOL_META, fmtPx, symbolFa } from '@/lib/trading-types'
 import { CandleChart } from './CandleChart'
 import { ConfidenceRing } from './ConfidenceRing'
+import { MarketScanner } from './MarketScanner'
 import { TrendingUp, TrendingDown, Minus, Clock, Flame, Hand } from 'lucide-react'
 
 export function fmtMoney(n: number, sign = false) {
@@ -127,6 +128,9 @@ export function HomeTab({ state, tick, now, onManualTrade, onSetSymbol }: {
         </div>
       </section>
 
+      {/* Multi-market scanner: latest AI verdict of every market */}
+      <MarketScanner state={state} now={now} onSetSymbol={onSetSymbol} />
+
       {/* Latest AI signal */}
       <section className="rounded-2xl border border-border bg-card p-4" aria-label="آخرین سیگنال هوش مصنوعی">
         <div className="flex items-center justify-between">
@@ -208,7 +212,15 @@ export function HomeTab({ state, tick, now, onManualTrade, onSetSymbol }: {
           </div>
         ) : (
           <div className="mt-2 space-y-2">
-            {open.slice(0, 3).map(t => <OpenTradeRow key={t.id} trade={t} now={now} payout={state.settings.payout} />)}
+            {open.slice(0, 3).map(t => (
+              <OpenTradeRow
+                key={t.id}
+                trade={t}
+                now={now}
+                payout={state.settings.payout}
+                livePrice={state.symbolTicks?.[t.symbol]?.price}
+              />
+            ))}
           </div>
         )}
       </section>
@@ -216,12 +228,19 @@ export function HomeTab({ state, tick, now, onManualTrade, onSetSymbol }: {
   )
 }
 
-export function OpenTradeRow({ trade, now, payout, onClose }: { trade: FullState['trades'][number]; now: number; payout: number; onClose?: () => void }) {
+export function OpenTradeRow({ trade, now, payout, onClose, livePrice }: { trade: FullState['trades'][number]; now: number; payout: number; onClose?: () => void; livePrice?: number }) {
   const remainMs = Math.max(0, trade.closeTime - now)
   const totalMs = trade.durationSec * 1000
   const pct = 100 - (remainMs / totalMs) * 100
   const secLeft = Math.ceil(remainMs / 1000)
   const buy = trade.direction === 'BUY'
+
+  // live position status: current market price vs entry (demo turbo trades settle
+  // by direction, MT5 trades already stream live pnl from the engine)
+  const mt5Live = trade.mode === 'mt5' && typeof trade.pnl === 'number'
+  const diff = livePrice !== undefined ? livePrice - trade.openPrice : 0
+  const inProfit = buy ? diff > 0 : diff < 0
+  const hasLive = livePrice !== undefined && (trade.mode === 'demo' || mt5Live)
 
   return (
     <div className="rounded-xl border border-border bg-black/30 p-3">
@@ -232,6 +251,11 @@ export function OpenTradeRow({ trade, now, payout, onClose }: { trade: FullState
           </span>
           <span className="text-xs font-bold">{symbolFa(trade.symbol)}</span>
           {trade.stake > 0 ? <span className="text-[10px] text-[#a89d8d] tabular-nums">${trade.stake}</span> : <span className="text-[10px] text-[#a89d8d] tabular-nums">{trade.lots} لات</span>}
+          {hasLive && (
+            <span className={`rounded-md px-1.5 py-0.5 text-[9px] font-black ${inProfit ? 'bg-[#35c98e]/15 text-[#35c98e]' : 'bg-[#f4536b]/15 text-[#f4536b]'}`}>
+              {inProfit ? 'در سود ▲' : 'در ضرر ▼'}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {onClose && (
@@ -253,7 +277,15 @@ export function OpenTradeRow({ trade, now, payout, onClose }: { trade: FullState
         <div className="h-full rounded-full bg-gradient-to-l from-[#f7d77e] to-[#f5b52a] transition-all duration-300" style={{ width: `${pct}%` }} />
       </div>
       <div className="mt-1.5 flex justify-between text-[10px] text-[#a89d8d] tabular-nums">
-        <span dir="ltr">ورود: {fmtPx(trade.symbol, trade.openPrice)}</span>
+        <span dir="ltr">
+          ورود: {fmtPx(trade.symbol, trade.openPrice)}
+          {hasLive && (
+            <>
+              {' → '}
+              <span className={`font-bold ${inProfit ? 'text-[#35c98e]' : 'text-[#f4536b]'}`}>{fmtPx(trade.symbol, livePrice!)}</span>
+            </>
+          )}
+        </span>
         <span>{trade.comment === 'MANUAL' ? 'معامله دستی' : `اطمینان: ${trade.confidence}٪`}</span>
       </div>
     </div>

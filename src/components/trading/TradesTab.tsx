@@ -1,10 +1,10 @@
 'use client'
 
 import type { FullState, Trade } from '@/lib/trading-types'
-import { fmtPx, symbolFa } from '@/lib/trading-types'
+import { SYMBOL_LIST, SYMBOL_META, fmtPx, symbolFa } from '@/lib/trading-types'
 import { fmtMoney, pnlClass } from './HomeTab'
 import { OpenTradeRow } from './HomeTab'
-import { Trophy, TrendingUp, Download, Flame, Snowflake } from "lucide-react"
+import { Trophy, TrendingUp, Download, Flame, Snowflake, BarChart3 } from "lucide-react"
 
 /** Cumulative-PnL curve (equity curve) built from closed trades, oldest first. */
 function EquityCurve({ trades, balance, totalPnl }: { trades: Trade[]; balance: number; totalPnl: number }) {
@@ -62,10 +62,59 @@ function EquityCurve({ trades, balance, totalPnl }: { trades: Trade[]; balance: 
         <polyline points={line} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
         <circle cx={last[0]} cy={last[1]} r="3.5" fill={stroke} />
       </svg>
-      <div className="mt-1 flex justify-between text-[10px] text-[#8d7b5e] tabular-nums">
-        <span dir="ltr">{fmtMoney(points[0])}</span>
-        <span className="font-bold" dir="ltr" style={{ color: stroke }}>{fmtMoney(points[points.length - 1])}</span>
+      {/* ltr so the start value sits under the left edge of the curve, matching the SVG direction */}
+      <div className="mt-1 flex justify-between text-[10px] text-[#8d7b5e] tabular-nums" dir="ltr">
+        <span>{fmtMoney(points[0])}</span>
+        <span className="font-bold" style={{ color: stroke }}>{fmtMoney(points[points.length - 1])}</span>
       </div>
+    </div>
+  )
+}
+
+/** Per-market performance computed from the closed-trade history. */
+function SymbolBreakdown({ trades }: { trades: Trade[] }) {
+  const closed = trades.filter(t => t.status === 'closed')
+  const bySymbol = SYMBOL_LIST.map(sym => {
+    const rows = closed.filter(t => t.symbol === sym)
+    const wins = rows.filter(t => t.result === 'WIN').length
+    const losses = rows.filter(t => t.result === 'LOSS').length
+    const pnl = +rows.reduce((s, t) => s + (t.pnl ?? 0), 0).toFixed(2)
+    const winRate = wins + losses > 0 ? Math.round((wins / (wins + losses)) * 100) : 0
+    return { sym, total: rows.length, wins, losses, pnl, winRate }
+  }).filter(r => r.total > 0)
+
+  if (bySymbol.length === 0) {
+    return <p className="py-3 text-center text-xs text-[#a89d8d]">بعد از اولین معامله، عملکرد هر بازار اینجا نمایش داده می‌شود</p>
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      {bySymbol.map(r => {
+        const meta = SYMBOL_META[r.sym]
+        return (
+          <div key={r.sym} className="rounded-xl bg-black/30 p-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="rounded-md bg-[#f5b52a]/10 px-1.5 py-0.5 text-[10px] font-black text-[#f5b52a]">{meta.badge}</span>
+                <span className="text-xs font-bold">{meta.fa}</span>
+                <span className="text-[9px] text-[#8d7b5e] tabular-nums">{r.total} معامله • {r.wins}برد / {r.losses}باخت</span>
+              </div>
+              <span className={`text-xs font-black tabular-nums ${pnlClass(r.pnl)}`}>{fmtMoney(r.pnl, true)}</span>
+            </div>
+            <div className="mt-1.5 flex items-center gap-2">
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#2c251e]">
+                <div
+                  className={`h-full rounded-full ${r.winRate >= 50 ? 'bg-gradient-to-l from-[#35c98e] to-[#7ee2bd]' : 'bg-gradient-to-l from-[#f4536b] to-[#ff8fa0]'}`}
+                  style={{ width: `${Math.max(3, r.winRate)}%` }}
+                />
+              </div>
+              <span className={`w-10 text-left text-[10px] font-black tabular-nums ${r.winRate >= 50 ? 'text-[#35c98e]' : 'text-[#f4536b]'}`}>
+                {r.winRate}٪
+              </span>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -183,6 +232,18 @@ export function TradesTab({
         </div>
       </section>
 
+      {/* Per-market performance */}
+      <section className="rounded-2xl border border-border bg-card p-4" aria-label="عملکرد به تفکیک بازار">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-[#f5b52a]" />
+            <h2 className="text-sm font-bold">عملکرد به تفکیک بازار</h2>
+          </div>
+          <span className="text-[10px] text-[#a89d8d]">طلا • بیت‌کوین • یورو</span>
+        </div>
+        <SymbolBreakdown trades={state.trades} />
+      </section>
+
       {/* Open trades with live countdown + close */}
       <section className="rounded-2xl border border-border bg-card p-4" aria-label="معامله‌های باز">
         <h2 className="text-sm font-bold">باز ({open.length})</h2>
@@ -191,7 +252,14 @@ export function TradesTab({
         ) : (
           <div className="mt-2 space-y-2">
             {open.map(t => (
-              <OpenTradeRow key={t.id} trade={t} now={now} payout={state.settings.payout} onClose={() => onCloseTrade(t.id)} />
+              <OpenTradeRow
+                key={t.id}
+                trade={t}
+                now={now}
+                payout={state.settings.payout}
+                onClose={() => onCloseTrade(t.id)}
+                livePrice={state.symbolTicks?.[t.symbol]?.price}
+              />
             ))}
           </div>
         )}
