@@ -62,5 +62,11 @@ httpServer.listen(PORT, () => {
   console.log(`Trading engine running on port ${PORT}`)
 })
 
-process.on('SIGTERM', () => { engine.stop(); httpServer.close(() => process.exit(0)) })
-process.on('SIGINT', () => { engine.stop(); httpServer.close(() => process.exit(0)) })
+function shutdown() {
+  try { engine.stop() } catch {}
+  try { httpServer.close() } catch {}
+  io.close()
+  process.exit(0)
+}
+process.on('SIGTERM', shutdown)
+process.on('SIGINT', shutdown)

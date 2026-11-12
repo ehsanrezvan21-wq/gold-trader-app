@@ -5,7 +5,7 @@ import type {
   AISignal, BotSettings, BotStats, Candle, FullState, LogEntry, Tick, Trade,
 } from './types'
 import { CandleBuilder, MarketSimulator, PIP, computeIndicators } from './market'
-import { analyzeMarket } from './ai'
+import { analyzeMarket, localVerdict } from './ai'
 import { demoSettle, mt5Account, mt5Close, mt5Open, mt5Positions } from './broker'
 
 const STATE_FILE = path.join(__dirname, 'state.json')
@@ -15,7 +15,7 @@ const MAX_HISTORY = 150
 export const DEFAULT_SETTINGS: BotSettings = {
   stake: 10,
   payout: 1.85,
-  minConfidence: 62,
+  minConfidence: 58,
   maxConcurrent: 3,
   dailyLossCap: 40,
   tradeDurationSec: 45,
@@ -162,6 +162,7 @@ export class TradingEngine {
     this.balance = 100
     this.dayPnl = 0
     this.resetDay()
+    this.stats = { wins: 0, losses: 0, totalTrades: 0, totalPnl: 0, todayTrades: 0, todayPnl: 0, winRate: 0 }
     this.trades = []
     this.signals = []
     this.logs = []
@@ -254,42 +255,29 @@ export class TradingEngine {
     try {
       const candles = this.builder1m.closed.slice(-40)
       const verdict = await analyzeMarket(candles)
-      const indicators = verdict.indicators
-      const price = this.tick?.price ?? this.market.price
-
-      let acted = false
-      let actedTrade: Trade | null = null
-      if (verdict.action !== 'HOLD' && verdict.confidence >= this.settings.minConfidence && this.settings.botRunning) {
-        const r = this.tryOpenTrade(verdict.action as 'BUY' | 'SELL', verdict.confidence, verdict.reason)
-        acted = r.ok
-        actedTrade = r.trade ?? null
-      }
-
-      const signal: AISignal = {
-        id: Math.random().toString(36).slice(2),
-        time: Date.now(),
-        action: verdict.action,
-        confidence: verdict.confidence,
-        reason: verdict.reason,
-        price,
-        indicators,
-        acted,
-      }
       this.rateBackoff = 0
-      this.signals.unshift(signal)
-      if (this.signals.length > 30) this.signals.pop()
-
-      const tag = verdict.action === 'HOLD' ? '' : acted ? ' → معامله باز شد' : verdict.confidence >= this.settings.minConfidence ? ' (بات غیرفعال یا ظرفیت تکمیل)' : ` (زیر حد اطمینان ${this.settings.minConfidence}%)`
-      this.log('ai', `AI: ${verdict.action === 'BUY' ? 'خرید' : verdict.action === 'SELL' ? 'فروش' : 'انتظار'} — اطمینان ${verdict.confidence}٪ — ${verdict.reason}${tag}`)
-      if (actedTrade) this.log('success', `معامله ${verdict.action === 'BUY' ? 'خرید' : 'فروش'} XAUUSD با حجم $${actedTrade.stake} باز شد — هدف: ${actedTrade.durationSec} ثانیه`)
+      // If GLM hesitates (HOLD) but technicals clearly lean one way, follow the technical signal
+      let final = verdict
+      if (verdict.action === 'HOLD') {
+        const local = localVerdict(candles)
+        if (local.action !== 'HOLD' && local.confidence >= 60) {
+          final = { ...local, reason: `${local.reason} — تأیید تکنیکال` }
+        }
+      }
+      this.applyVerdict(final, 'AI')
     } catch (e: any) {
       const msg = String(e?.message || 'نامشخص')
-      if (msg.includes('429') || msg.toLowerCase().includes('too many')) {
-        // rate-limited: exponential backoff up to 90s
+      const rateLimited = msg.includes('429') || msg.toLowerCase().includes('too many')
+      if (rateLimited) {
+        // rate-limited: exponential backoff up to 90s for the GLM call
         this.rateBackoff = Math.min((this.rateBackoff || 20) * 1.6, 90)
-        this.lastSignalAt = Date.now()
-        this.log('warn', `محدودیت نرخ سرویس هوش مصنوعی — تحلیل بعدی در ${Math.round(this.rateBackoff)} ثانیه`)
-      } else {
+      }
+      // keep the bot alive: local technical verdict while GLM is unavailable
+      try {
+        const candles = this.builder1m.closed.slice(-40)
+        const verdict = localVerdict(candles)
+        this.applyVerdict(verdict, 'تکنیکال')
+      } catch {
         this.log('error', `خطای تحلیل هوش مصنوعی: ${msg}`)
       }
     } finally {
@@ -297,6 +285,36 @@ export class TradingEngine {
       this.lastSignalAt = Date.now()
       this.onEmit()
     }
+  }
+
+  private applyVerdict(verdict: { action: 'BUY' | 'SELL' | 'HOLD'; confidence: number; reason: string; indicators: ReturnType<typeof computeIndicators> }, source: 'AI' | 'تکنیکال') {
+    const price = this.tick?.price ?? this.market.price
+
+    let acted = false
+    let actedTrade: Trade | null = null
+    if (verdict.action !== 'HOLD' && verdict.confidence >= this.settings.minConfidence && this.settings.botRunning) {
+      const r = this.tryOpenTrade(verdict.action as 'BUY' | 'SELL', verdict.confidence, verdict.reason)
+      acted = r.ok
+      actedTrade = r.trade ?? null
+    }
+
+    const signal: AISignal = {
+      id: Math.random().toString(36).slice(2),
+      time: Date.now(),
+      action: verdict.action,
+      confidence: verdict.confidence,
+      reason: verdict.reason,
+      price,
+      indicators: verdict.indicators,
+      acted,
+    }
+    this.signals.unshift(signal)
+    if (this.signals.length > 30) this.signals.pop()
+
+    const label = source === 'AI' ? 'AI' : 'تحلیل تکنیکال (AI موقتاً در دسترس نیست)'
+    const tag = verdict.action === 'HOLD' ? '' : acted ? ' → معامله باز شد' : verdict.confidence >= this.settings.minConfidence ? ' (بات غیرفعال یا ظرفیت تکمیل)' : ` (زیر حد اطمینان ${this.settings.minConfidence}%)`
+    this.log(source === 'AI' ? 'ai' : 'info', `${label}: ${verdict.action === 'BUY' ? 'خرید' : verdict.action === 'SELL' ? 'فروش' : 'انتظار'} — اطمینان ${verdict.confidence}٪ — ${verdict.reason}${tag}`)
+    if (actedTrade) this.log('success', `معامله ${verdict.action === 'BUY' ? 'خرید' : 'فروش'} XAUUSD با حجم $${actedTrade.stake} باز شد — هدف: ${actedTrade.durationSec} ثانیه`)
   }
 
   private canOpen(): { ok: boolean; reason?: string } {
