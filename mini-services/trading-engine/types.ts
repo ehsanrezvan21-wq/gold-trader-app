@@ -39,6 +39,10 @@ export interface BotSettings {
   botRunning: boolean
   /** play sounds / vibration on trade events */
   soundEnabled: boolean
+  /** rest period (seconds) after a LOSS before the bot may trade again */
+  cooldownAfterLossSec: number
+  /** pause the bot automatically after N consecutive losses */
+  maxConsecutiveLosses: number
 }
 
 export interface Trade {
@@ -82,6 +86,8 @@ export interface AISignal {
     ema21: number
     atr: number
     trend: 'UP' | 'DOWN' | 'FLAT'
+    /** Kaufman Efficiency Ratio 0..1 — low = choppy/noisy market */
+    ker: number
   }
   acted: boolean
 }
@@ -114,6 +120,20 @@ export interface BotStats {
   todayTrades: number
   todayPnl: number
   winRate: number
+  /** biggest single win in USD (positive) */
+  bestTrade: number
+  /** biggest single loss in USD (negative) */
+  worstTrade: number
+  /** current streak: +n = n wins in a row, -n = n losses in a row */
+  streak: number
+  /** longest win streak */
+  bestStreak: number
+  /** longest loss streak (negative) */
+  worstStreak: number
+  /** sum of all winning pnl (for profit factor) */
+  grossProfit: number
+  /** sum of all losing pnl, negative (for profit factor) */
+  grossLoss: number
 }
 
 export interface LogEntry {

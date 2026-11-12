@@ -155,6 +155,20 @@ export function trendOf(closes: number[]): 'UP' | 'DOWN' | 'FLAT' {
   return 'FLAT'
 }
 
+/**
+ * Kaufman Efficiency Ratio (0..1): net move divided by the sum of absolute
+ * per-candle moves. High = efficient directional market, low = choppy noise.
+ */
+export function ker(closes: number[], period = 10): number {
+  if (closes.length < period + 1) return 0.5
+  const slice = closes.slice(-(period + 1))
+  const net = Math.abs(slice[slice.length - 1] - slice[0])
+  let path = 0
+  for (let i = 1; i < slice.length; i++) path += Math.abs(slice[i] - slice[i - 1])
+  if (path === 0) return 0
+  return +(net / path).toFixed(3)
+}
+
 export function computeIndicators(candles: Candle[]) {
   const closes = candles.map(c => c.c)
   const m = macd(closes)
@@ -166,6 +180,7 @@ export function computeIndicators(candles: Candle[]) {
     ema21: +ema(closes, 21)[closes.length - 1].toFixed(2),
     atr: atr(candles),
     trend: trendOf(closes),
+    ker: ker(closes),
   }
 }
 

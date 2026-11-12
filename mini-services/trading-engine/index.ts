@@ -47,6 +47,8 @@ io.on('connection', socket => {
       if (patch.metaapiRegion !== undefined) safe.metaapiRegion = String(patch.metaapiRegion).slice(0, 40)
       if (patch.botRunning !== undefined) safe.botRunning = Boolean(patch.botRunning)
       if (patch.soundEnabled !== undefined) safe.soundEnabled = Boolean(patch.soundEnabled)
+      if (patch.cooldownAfterLossSec !== undefined) safe.cooldownAfterLossSec = Math.max(0, Math.min(300, Number(patch.cooldownAfterLossSec) || 0))
+      if (patch.maxConsecutiveLosses !== undefined) safe.maxConsecutiveLosses = Math.max(0, Math.min(20, Math.round(Number(patch.maxConsecutiveLosses) || 0)))
       engine.updateSettings(safe)
     } catch (e: any) {
       socket.emit('error-msg', e?.message || 'خطا در ذخیره تنظیمات')
@@ -76,3 +78,10 @@ function shutdown() {
 }
 process.on('SIGTERM', shutdown)
 process.on('SIGINT', shutdown)
+// never let an async edge (network hiccup, SDK internals) kill the trading loop
+process.on('unhandledRejection', (reason: any) => {
+  console.error('[unhandledRejection]', reason?.message || reason)
+})
+process.on('uncaughtException', (err: Error) => {
+  console.error('[uncaughtException]', err.message)
+})

@@ -27,6 +27,7 @@ const SYSTEM_PROMPT = `تو یک تحلیل‌گر حرفه‌ای معاملا�
 - مهم: در حالت توربو باید جسورانه باشی. اگر روند یا مومنتوم حتی کمی جهت‌دار است، BUY یا SELL بده. HOLD فقط وقتی بده که RSI بین ۴۵ تا ۵۵ باشد و روند واقعاً خنثی و MACD نزدیک صفر باشد. انتظار نداشته باش همیشه HOLD بگویی — اکثر مواقع باید BUY یا SELL بدهی.
 - اگر RSI بالای ۶۵ است به SELL و اگر زیر ۳۵ است به BUY تمایل نشان بده (بازگشت به میانگین).
 - کراس MACD، موقعیت EMA9 نسبت به EMA21 و روند مهم‌ترین سیگنال‌ها هستند.
+- «کارایی روند» (KER) بین ۰ تا ۱ است: زیر ۰٫۱۵ یعنی بازار چرخشی/بی‌رون است و در آن ورود کم‌بازده است — یا HOLD بده یا confidence را زیر ۶۰ نگه دار. بالای ۰٫۳ یعنی بازار جهت‌دار و مناسب ورود است.
 - confidence: ست‌آپ قوی = ۷۵ تا ۹۵، ست‌آپ متوسط = ۶۲ تا ۷۵، مردد = ۵۰ تا ۶۲.
 - reason باید حداکثر ۱۲ کلمه باشد و به ذکر حداقل یکی از اندیکاتورها بپردازد.`
 
@@ -41,6 +42,7 @@ export async function analyzeMarket(candles: Candle[]): Promise<AIVerdict & { in
 - MACD: ${indicators.macd} / سیگنال: ${indicators.macdSignal} (هیستوگرام: ${(indicators.macd - indicators.macdSignal).toFixed(3)})
 - EMA9: ${indicators.ema9} / EMA21: ${indicators.ema21} (روند: ${indicators.trend === 'UP' ? 'صعودی' : indicators.trend === 'DOWN' ? 'نزولی' : 'خنثی'})
 - ATR(14): ${indicators.atr}
+- کارایی روند KER: ${indicators.ker} (${indicators.ker < 0.15 ? 'بازار چرخشی/بی‌رون' : indicators.ker > 0.3 ? 'بازار جهت‌دار' : 'نرمال'})
 - ۲۴ کندل اخیر (close): ${closes}
 
 نتیجه تحلیل را فقط به صورت JSON بده.`
@@ -80,14 +82,32 @@ export function localVerdict(candles: Candle[]): AIVerdict & { indicators: Retur
   if (indicators.trend === 'UP') { score += 1; reasons.push('EMA9 بالاتر از EMA21') }
   else if (indicators.trend === 'DOWN') { score -= 1; reasons.push('EMA9 پایین‌تر از EMA21') }
 
-  const action = score >= 2 ? 'BUY' : score <= -2 ? 'SELL' : 'HOLD'
-  const confidence = action === 'HOLD'
-    ? 40 + Math.abs(score) * 5
-    : Math.min(88, 58 + Math.abs(score) * 8 + (indicators.rsi <= 30 || indicators.rsi >= 70 ? 6 : 0))
+  // short-term momentum: last 3 candle closes
+  if (candles.length >= 4) {
+    const c = candles.map(x => x.c)
+    const mom = c[c.length - 1] - c[c.length - 4]
+    if (mom > 0) { score += 1; reasons.push('مومنتوم ۳ کندل اخیر صعودی') }
+    else if (mom < 0) { score -= 1; reasons.push('مومنتوم ۳ کندل اخیر نزولی') }
+  }
 
-  const prefix = action === 'BUY' ? 'احتمال صعود — ' : action === 'SELL' ? 'احتمال نزول — ' : 'سیگنال مبهم — '
+  // chop filter: Kaufman Efficiency Ratio — in a round-trip market entries have
+  // negative expectancy regardless of indicator direction
+  const choppy = indicators.ker < 0.12
+  if (choppy) reasons.push(`بازار چرخشی (KER ${indicators.ker})`)
+
+  let action: 'BUY' | 'SELL' | 'HOLD' = score >= 2 ? 'BUY' : score <= -2 ? 'SELL' : 'HOLD'
+  if (choppy && Math.abs(score) < 4) action = 'HOLD'
+
+  const base = action === 'HOLD'
+    ? 40 + Math.abs(score) * 5
+    : Math.min(88, 58 + Math.abs(score) * 7 + (indicators.rsi <= 30 || indicators.rsi >= 70 ? 6 : 0))
+  // efficient market boost / choppy market damping
+  const conf = choppy ? Math.min(base, 55) : indicators.ker > 0.3 ? base + 4 : base
+  const confidence = Math.round(conf)
+
+  const prefix = action === 'BUY' ? 'احتمال صعود — ' : action === 'SELL' ? 'احتمال نزول — ' : action === 'HOLD' && choppy ? 'بازار بی‌رون است — ' : 'سیگنال مبهم — '
   const reason = prefix + (reasons.length ? reasons.slice(0, 2).join(' و ') : 'تشخیص تکنیکال')
-  return { action, confidence: Math.round(confidence), reason, indicators }
+  return { action, confidence, reason, indicators }
 }
 
 function parseVerdict(raw: string): AIVerdict {

@@ -95,6 +95,35 @@ export function SettingsTab({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
+              <Label className="text-xs">استراحت بعد از باخت (ثانیه)</Label>
+              <Input
+                className="mt-1.5 h-10 text-center tabular-nums"
+                type="number"
+                min={0}
+                max={300}
+                value={s.cooldownAfterLossSec}
+                onChange={e => onPatch({ cooldownAfterLossSec: Math.max(0, Math.min(300, Number(e.target.value) || 0)) })}
+                aria-label="استراحت بعد از باخت"
+              />
+              <p className="mt-1 text-[10px] text-[#a89d8d]">۰ = غیرفعال. معامله دستی مشمول استراحت نمی‌شود.</p>
+            </div>
+            <div>
+              <Label className="text-xs">توقف بعد از باخت‌های پیاپی</Label>
+              <Input
+                className="mt-1.5 h-10 text-center tabular-nums"
+                type="number"
+                min={0}
+                max={20}
+                value={s.maxConsecutiveLosses}
+                onChange={e => onPatch({ maxConsecutiveLosses: Math.max(0, Math.min(20, Math.round(Number(e.target.value) || 0))) })}
+                aria-label="توقف بعد از باخت‌های پیاپی"
+              />
+              <p className="mt-1 text-[10px] text-[#a89d8d]">۰ = غیرفعال. پیشنهاد: ۳</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
               <Label className="text-xs">ضریب برد (پرداخت)</Label>
               <Input
                 className="mt-1.5 h-10 text-center tabular-nums"

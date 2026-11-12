@@ -29,6 +29,15 @@ export const DEFAULT_SETTINGS: BotSettings = {
   metaapiRegion: 'new-york',
   botRunning: false,
   soundEnabled: true,
+  cooldownAfterLossSec: 12,
+  maxConsecutiveLosses: 3,
+}
+
+export function freshStats(): BotStats {
+  return {
+    wins: 0, losses: 0, totalTrades: 0, totalPnl: 0, todayTrades: 0, todayPnl: 0, winRate: 0,
+    bestTrade: 0, worstTrade: 0, streak: 0, bestStreak: 0, worstStreak: 0, grossProfit: 0, grossLoss: 0,
+  }
 }
 
 interface PersistState {
@@ -54,7 +63,8 @@ function loadState(): PersistState {
         balance: typeof s.balance === 'number' ? s.balance : 100,
         dayPnl: s.dayPnl ?? 0,
         dayKey: s.dayKey ?? todayKey(),
-        stats: s.stats ?? { wins: 0, losses: 0, totalTrades: 0, totalPnl: 0, todayTrades: 0, todayPnl: 0, winRate: 0 },
+        // merge for migration: older state.json files lack the new stat fields
+        stats: { ...freshStats(), ...(s.stats ?? {}) },
         trades: Array.isArray(s.trades) ? s.trades.slice(0, MAX_HISTORY) : [],
       }
     }
@@ -64,7 +74,7 @@ function loadState(): PersistState {
     balance: 100,
     dayPnl: 0,
     dayKey: todayKey(),
-    stats: { wins: 0, losses: 0, totalTrades: 0, totalPnl: 0, todayTrades: 0, todayPnl: 0, winRate: 0 },
+    stats: freshStats(),
     trades: [],
   }
 }
@@ -75,7 +85,7 @@ export class TradingEngine {
   dayPnl = 0
   dayKey = todayKey()
   pausedReason: string | null = null
-  stats: BotStats = { wins: 0, losses: 0, totalTrades: 0, totalPnl: 0, todayTrades: 0, todayPnl: 0, winRate: 0 }
+  stats: BotStats = freshStats()
   trades: Trade[] = []
   signals: AISignal[] = []
   logs: LogEntry[] = []
@@ -91,6 +101,8 @@ export class TradingEngine {
   private aiBusy = false
   private lastSignalAt = 0
   private rateBackoff = 0
+  private lastGlmTryAt = 0
+  private lastLossAt = 0
   private onEmit: () => void = () => {}
   private timers: NodeJS.Timeout[] = []
   private saveDebounce: NodeJS.Timeout | null = null
@@ -163,10 +175,11 @@ export class TradingEngine {
     this.balance = 100
     this.dayPnl = 0
     this.resetDay()
-    this.stats = { wins: 0, losses: 0, totalTrades: 0, totalPnl: 0, todayTrades: 0, todayPnl: 0, winRate: 0 }
+    this.stats = freshStats()
     this.trades = []
     this.signals = []
     this.logs = []
+    this.lastLossAt = 0
     this.log('info', 'حساب دمو ریست شد — موجودی: $100')
     this.save()
     this.onEmit()
@@ -182,7 +195,7 @@ export class TradingEngine {
     }
   }
 
-  /** Manual BUY/SELL from the user, bypassing the AI confidence gate but respecting risk limits. */
+  /** Manual BUY/SELL from the user, bypassing the AI confidence gate and the post-loss cooldown. */
   openManualTrade(direction: 'BUY' | 'SELL'): { ok: boolean; reason?: string } {
     const check = this.canOpen()
     if (!check.ok) {
@@ -190,12 +203,12 @@ export class TradingEngine {
       this.onEmit()
       return { ok: false, reason: check.reason }
     }
-    const r = this.tryOpenTrade(direction, 100, 'معامله دستی کاربر', 'MANUAL')
+    const r = this.tryOpenTrade(direction, 100, 'معامله دستی کاربر', 'MANUAL', true)
     if (r.ok) {
       this.log('success', `معامله دستی ${direction === 'BUY' ? 'خرید' : 'فروش'} XAUUSD باز شد — بستن خودکار در ${this.settings.tradeDurationSec} ثانیه`)
     }
     this.onEmit()
-    return { ok: r.ok, reason: r.ok ? undefined : 'ظرفیت تکمیل است' }
+    return { ok: r.ok, reason: r.ok ? undefined : r.reason }
   }
 
   // ─── internals ───
@@ -266,36 +279,44 @@ export class TradingEngine {
 
   private async aiCycle() {
     if (this.aiBusy) return
-    const wait = this.settings.signalIntervalSec * 1000 + this.rateBackoff * 1000
-    if (Date.now() - this.lastSignalAt < wait) return
+    // technical analysis always runs at full turbo cadence; only the GLM call
+    // is throttled separately by its own rate-limit backoff
+    if (Date.now() - this.lastSignalAt < this.settings.signalIntervalSec * 1000) return
     this.aiBusy = true
     try {
       const candles = this.builder1m.closed.slice(-40)
-      const verdict = await analyzeMarket(candles)
-      this.rateBackoff = 0
-      // If GLM hesitates (HOLD) but technicals clearly lean one way, follow the technical signal
-      let final = verdict
-      if (verdict.action === 'HOLD') {
-        const local = localVerdict(candles)
-        if (local.action !== 'HOLD' && local.confidence >= 60) {
-          final = { ...local, reason: `${local.reason} — تأیید تکنیکال` }
+      const glmReady = Date.now() - this.lastGlmTryAt >= this.rateBackoff * 1000
+      if (glmReady) {
+        this.lastGlmTryAt = Date.now()
+        try {
+          const verdict = await analyzeMarket(candles)
+          this.rateBackoff = 0
+          // If GLM hesitates (HOLD) but technicals clearly lean one way, follow the technical signal
+          let final = verdict
+          if (verdict.action === 'HOLD') {
+            const local = localVerdict(candles)
+            if (local.action !== 'HOLD' && local.confidence >= 60) {
+              final = { ...local, reason: `${local.reason} — تأیید تکنیکال` }
+            }
+          }
+          this.applyVerdict(final, 'AI')
+          return
+        } catch (e: any) {
+          const msg = String(e?.message || 'نامشخص')
+          const rateLimited = msg.includes('429') || msg.toLowerCase().includes('too many')
+          if (rateLimited) {
+            // exponential backoff up to 120s — for the GLM call only
+            this.rateBackoff = Math.min((this.rateBackoff || 15) * 1.6, 120)
+          }
+          this.log('info', `AI در دسترس نیست (${rateLimited ? 'محدودیت نرخ' : 'خطا'}) — ادامه با تحلیل تکنیکال`)
         }
       }
-      this.applyVerdict(final, 'AI')
-    } catch (e: any) {
-      const msg = String(e?.message || 'نامشخص')
-      const rateLimited = msg.includes('429') || msg.toLowerCase().includes('too many')
-      if (rateLimited) {
-        // rate-limited: exponential backoff up to 90s for the GLM call
-        this.rateBackoff = Math.min((this.rateBackoff || 20) * 1.6, 90)
-      }
-      // keep the bot alive: local technical verdict while GLM is unavailable
+      // GLM cooling down or failed: keep the turbo loop alive with technicals
       try {
-        const candles = this.builder1m.closed.slice(-40)
         const verdict = localVerdict(candles)
         this.applyVerdict(verdict, 'تکنیکال')
-      } catch {
-        this.log('error', `خطای تحلیل هوش مصنوعی: ${msg}`)
+      } catch (e: any) {
+        this.log('error', `خطای تحلیل تکنیکال: ${e?.message || 'نامشخص'}`)
       }
     } finally {
       this.aiBusy = false
@@ -309,10 +330,12 @@ export class TradingEngine {
 
     let acted = false
     let actedTrade: Trade | null = null
+    let blockedReason: string | undefined
     if (verdict.action !== 'HOLD' && verdict.confidence >= this.settings.minConfidence && this.settings.botRunning) {
       const r = this.tryOpenTrade(verdict.action as 'BUY' | 'SELL', verdict.confidence, verdict.reason)
       acted = r.ok
       actedTrade = r.trade ?? null
+      blockedReason = r.reason
     }
 
     const signal: AISignal = {
@@ -329,18 +352,30 @@ export class TradingEngine {
     if (this.signals.length > 30) this.signals.pop()
 
     const label = source === 'AI' ? 'AI' : 'تحلیل تکنیکال (AI موقتاً در دسترس نیست)'
-    const tag = verdict.action === 'HOLD' ? '' : acted ? ' → معامله باز شد' : verdict.confidence >= this.settings.minConfidence ? ' (بات غیرفعال یا ظرفیت تکمیل)' : ` (زیر حد اطمینان ${this.settings.minConfidence}%)`
+    const tag = verdict.action === 'HOLD' ? '' : acted
+      ? ' → معامله باز شد'
+      : verdict.confidence >= this.settings.minConfidence
+        ? ` (${blockedReason || 'بات غیرفعال یا ظرفیت تکمیل'})`
+        : ` (زیر حد اطمینان ${this.settings.minConfidence}%)`
     this.log(source === 'AI' ? 'ai' : 'info', `${label}: ${verdict.action === 'BUY' ? 'خرید' : verdict.action === 'SELL' ? 'فروش' : 'انتظار'} — اطمینان ${verdict.confidence}٪ — ${verdict.reason}${tag}`)
     if (actedTrade) this.log('success', `معامله ${verdict.action === 'BUY' ? 'خرید' : 'فروش'} XAUUSD با حجم $${actedTrade.stake} باز شد — هدف: ${actedTrade.durationSec} ثانیه`)
   }
 
-  private canOpen(): { ok: boolean; reason?: string } {
+  private canOpen(includeCooldown = false): { ok: boolean; reason?: string } {
     if (this.pausedReason) return { ok: false, reason: this.pausedReason }
     if (this.dayPnl <= -this.settings.dailyLossCap) {
       this.pausedReason = `سقف ضرر روزانه (${this.settings.dailyLossCap}$) لمس شد — بات متوقف است`
       this.settings.botRunning = false
       this.log('warn', this.pausedReason)
       return { ok: false, reason: this.pausedReason }
+    }
+    // post-loss cooldown: prevents revenge-trading cascades right after a loss
+    if (includeCooldown && this.lastLossAt > 0) {
+      const waitMs = this.settings.cooldownAfterLossSec * 1000
+      const elapsed = Date.now() - this.lastLossAt
+      if (elapsed < waitMs) {
+        return { ok: false, reason: `استراحت بعد از باخت — ${Math.ceil((waitMs - elapsed) / 1000)} ثانیه تا معامله بعدی` }
+      }
     }
     const openCount = this.trades.filter(t => t.status === 'open').length
     if (openCount >= this.settings.maxConcurrent) return { ok: false, reason: 'ظرفیت معاملات همزمان تکمیل است' }
@@ -351,9 +386,9 @@ export class TradingEngine {
     return { ok: true }
   }
 
-  private tryOpenTrade(direction: 'BUY' | 'SELL', confidence: number, reason: string, comment?: string): { ok: boolean; trade?: Trade } {
-    const check = this.canOpen()
-    if (!check.ok) return { ok: false }
+  private tryOpenTrade(direction: 'BUY' | 'SELL', confidence: number, reason: string, comment?: string, skipCooldown = false): { ok: boolean; reason?: string; trade?: Trade } {
+    const check = this.canOpen(!skipCooldown)
+    if (!check.ok) return { ok: false, reason: check.reason }
     const now = Date.now()
     const base: Omit<Trade, 'openPrice' | 'mode' | 'positionId' | 'lots' | 'stake'> = {
       id: Math.random().toString(36).slice(2),
@@ -410,6 +445,9 @@ export class TradingEngine {
     this.applyTradeResult(trade)
     this.log(result === 'WIN' ? 'success' : 'warn',
       `معامله ${result === 'WIN' ? 'برد ✚' : 'باخت ✖'} — ${trade.direction} XAUUSD — سود/زیان: ${trade.pnl >= 0 ? '+' : ''}$${trade.pnl} (بسته شده در ${trade.durationSec} ثانیه)`)
+    if (result === 'LOSS' && this.settings.cooldownAfterLossSec > 0) {
+      this.log('info', `استراحت ${this.settings.cooldownAfterLossSec} ثانیه‌ای بعد از باخت فعال شد`)
+    }
   }
 
   private async settleMt5(trade: Trade, manual: boolean) {
@@ -447,6 +485,32 @@ export class TradingEngine {
     this.stats.winRate = this.stats.wins + this.stats.losses > 0
       ? Math.round((this.stats.wins / (this.stats.wins + this.stats.losses)) * 100)
       : 0
+
+    // deep stats: best/worst trade, streaks, gross pnl (profit factor)
+    const pnl = trade.pnl ?? 0
+    if (pnl > this.stats.bestTrade) this.stats.bestTrade = pnl
+    if (pnl < this.stats.worstTrade) this.stats.worstTrade = pnl
+    if (pnl > 0) {
+      this.stats.grossProfit = +(this.stats.grossProfit + pnl).toFixed(2)
+      this.stats.streak = this.stats.streak > 0 ? this.stats.streak + 1 : 1
+      if (this.stats.streak > this.stats.bestStreak) this.stats.bestStreak = this.stats.streak
+    } else if (pnl < 0) {
+      this.stats.grossLoss = +(this.stats.grossLoss + pnl).toFixed(2)
+      this.stats.streak = this.stats.streak < 0 ? this.stats.streak - 1 : -1
+      if (this.stats.streak < this.stats.worstStreak) this.stats.worstStreak = this.stats.streak
+    }
+
+    // timestamps for the post-loss cooldown
+    if (trade.result === 'LOSS') this.lastLossAt = Date.now()
+
+    // circuit breaker: pause after N consecutive losses
+    const limit = this.settings.maxConsecutiveLosses
+    if (trade.result === 'LOSS' && limit > 0 && this.stats.streak <= -limit) {
+      this.pausedReason = `${limit} باخت متوالی — بات برای محافظت از سرمایه متوقف شد`
+      this.settings.botRunning = false
+      this.log('warn', `${this.pausedReason} — پس از استراحت می‌توانید دوباره روشن کنید`)
+    }
+
     this.save()
   }
 

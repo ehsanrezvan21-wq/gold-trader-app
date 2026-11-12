@@ -33,25 +33,36 @@ export default function App() {
   const { toast } = useToast()
 
   useEffect(() => {
-    const socket = connectEngine({
-      onState: (s: FullState) => {
-        setState(s)
-        if (s.tick) setTick(s.tick)
-      },
-      onTick: (t: Tick) => setTick(t),
-      onError: (m: string) => {
-        toast({ title: 'خطا', description: m, variant: 'destructive' })
-      },
-    })
-    socket.on('connect', () => setConnected(true))
-    socket.on('disconnect', () => setConnected(false))
-    socket.on('connect_error', () => setConnected(false))
-    socketRef.current = socket
+    let cancelled = false
+    let socket: ReturnType<typeof connectEngine> | null = null
+    // make sure the engine mini-service is alive, then connect
+    fetch('/api/engine-boot')
+      .then(r => r.json())
+      .then(() => { if (!cancelled) connect() })
+      .catch(() => { if (!cancelled) connect() })
+
+    function connect() {
+      socket = connectEngine({
+        onState: (s: FullState) => {
+          setState(s)
+          if (s.tick) setTick(s.tick)
+        },
+        onTick: (t: Tick) => setTick(t),
+        onError: (m: string) => {
+          toast({ title: 'خطا', description: m, variant: 'destructive' })
+        },
+      })
+      socket.on('connect', () => setConnected(true))
+      socket.on('disconnect', () => setConnected(false))
+      socket.on('connect_error', () => setConnected(false))
+      socketRef.current = socket
+    }
 
     const clock = setInterval(() => setNow(Date.now()), 200)
     return () => {
+      cancelled = true
       clearInterval(clock)
-      socket.close()
+      socket?.close()
       socketRef.current = null
     }
   }, [])
@@ -76,6 +87,15 @@ export default function App() {
   const manualTrade = useCallback((d: 'BUY' | 'SELL') => {
     socketRef.current?.emit('manual-trade', d)
   }, [])
+
+  // reconnect watchdog: if the socket drops for a while, re-boot the engine and retry
+  useEffect(() => {
+    if (connected) return
+    const t = setTimeout(() => {
+      fetch('/api/engine-boot').catch(() => {})
+    }, 4000)
+    return () => clearTimeout(t)
+  }, [connected])
 
   // ─── trade lifecycle alerts: toast + sound + vibration ───
   useEffect(() => {
