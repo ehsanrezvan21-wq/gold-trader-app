@@ -121,6 +121,19 @@ export function SettingsTab({
             </div>
           </div>
 
+          {/* Sound alerts */}
+          <div className="flex items-center justify-between rounded-xl bg-black/30 p-3">
+            <div>
+              <div className="text-xs font-bold">صدای برد و باخت</div>
+              <p className="mt-0.5 text-[10px] text-[#a89d8d]">آهنگ هنگام باز شدن، برد و باخت معامله + لرزش گوشی</p>
+            </div>
+            <Switch
+              checked={s.soundEnabled}
+              onCheckedChange={v => onPatch({ soundEnabled: v })}
+              aria-label="صدای برد و باخت"
+            />
+          </div>
+
           {/* Emergency stop */}
           <button
             onClick={() => onPatch({ botRunning: false })}

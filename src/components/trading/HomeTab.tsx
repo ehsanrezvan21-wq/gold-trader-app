@@ -1,9 +1,9 @@
 'use client'
 
 import type { FullState, Tick } from '@/lib/trading-types'
-import { Sparkline } from './Sparkline'
+import { CandleChart } from './CandleChart'
 import { ConfidenceRing } from './ConfidenceRing'
-import { TrendingUp, TrendingDown, Minus, Clock, Flame } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, Clock, Flame, Hand } from 'lucide-react'
 
 export function fmtMoney(n: number, sign = false) {
   const abs = Math.abs(n)
@@ -16,9 +16,10 @@ export function pnlClass(n: number) {
   return n > 0 ? 'text-[#35c98e]' : n < 0 ? 'text-[#f4536b]' : 'text-stone-400'
 }
 
-export function HomeTab({ state, tick, now }: { state: FullState; tick: Tick | null; now: number }) {
+export function HomeTab({ state, tick, now, onManualTrade }: { state: FullState; tick: Tick | null; now: number; onManualTrade?: (d: 'BUY' | 'SELL') => void }) {
   const open = state.trades.filter(t => t.status === 'open')
   const lastSig = state.signals[0]
+  const capacityFull = open.length >= state.settings.maxConcurrent
 
   return (
     <div className="space-y-3">
@@ -71,7 +72,7 @@ export function HomeTab({ state, tick, now }: { state: FullState; tick: Tick | n
           </div>
         </div>
         <div className="mt-2">
-          <Sparkline candles={state.candles} />
+          <CandleChart candles={state.candles} />
         </div>
       </section>
 
@@ -101,6 +102,46 @@ export function HomeTab({ state, tick, now }: { state: FullState; tick: Tick | n
         ) : (
           <p className="mt-3 text-xs text-[#a89d8d]">اولین تحلیل در چند ثانیه آینده نمایش داده می‌شود…</p>
         )}
+      </section>
+
+      {/* Manual trade */}
+      <section className="rounded-2xl border border-border bg-card p-4" aria-label="معامله دستی">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Hand className="h-4 w-4 text-[#f5b52a]" />
+            <h2 className="text-sm font-bold">معامله دستی</h2>
+          </div>
+          <span className="text-[10px] text-[#a89d8d] tabular-nums">حجم: {state.settings.mode === 'demo' ? `$${state.settings.stake}` : `${state.settings.mt5Lots} لات`}</span>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            onClick={() => onManualTrade?.('BUY')}
+            disabled={capacityFull}
+            className={`flex flex-col items-center gap-0.5 rounded-xl border py-3 transition-colors ${
+              capacityFull
+                ? 'border-border bg-black/20 text-stone-600'
+                : 'border-[#35c98e]/40 bg-[#35c98e]/10 text-[#35c98e] active:bg-[#35c98e]/25'
+            }`}
+            aria-label="خرید دستی XAUUSD"
+          >
+            <span className="flex items-center gap-1 text-sm font-black"><TrendingUp className="h-4 w-4" /> خرید</span>
+            <span className="text-[9px] tabular-nums" dir="ltr">ASK {tick ? tick.ask.toFixed(2) : '—'}</span>
+          </button>
+          <button
+            onClick={() => onManualTrade?.('SELL')}
+            disabled={capacityFull}
+            className={`flex flex-col items-center gap-0.5 rounded-xl border py-3 transition-colors ${
+              capacityFull
+                ? 'border-border bg-black/20 text-stone-600'
+                : 'border-[#f4536b]/40 bg-[#f4536b]/10 text-[#f4536b] active:bg-[#f4536b]/25'
+            }`}
+            aria-label="فروش دستی XAUUSD"
+          >
+            <span className="flex items-center gap-1 text-sm font-black"><TrendingDown className="h-4 w-4" /> فروش</span>
+            <span className="text-[9px] tabular-nums" dir="ltr">BID {tick ? tick.bid.toFixed(2) : '—'}</span>
+          </button>
+        </div>
+        <p className="mt-2 text-[10px] leading-5 text-[#a89d8d]">معامله دستی بدون نیاز به سیگنال AI باز می‌شود و بعد از زمان توربو خودکار بسته می‌شود.</p>
       </section>
 
       {/* Open trades mini */}
@@ -163,7 +204,7 @@ export function OpenTradeRow({ trade, now, payout, onClose }: { trade: FullState
       </div>
       <div className="mt-1.5 flex justify-between text-[10px] text-[#a89d8d] tabular-nums">
         <span>ورود: {trade.openPrice.toFixed(2)}</span>
-        <span>اطمینان: {trade.confidence}٪</span>
+        <span>{trade.comment === 'MANUAL' ? 'معامله دستی' : `اطمینان: ${trade.confidence}٪`}</span>
       </div>
     </div>
   )

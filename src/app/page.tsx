@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BotSettings, FullState, Tick } from '@/lib/trading-types'
 import { connectEngine } from '@/lib/engine-socket'
-import { HomeTab } from '@/components/trading/HomeTab'
+import { playTradeOpen, playWin, playLoss } from '@/lib/alerts'
+import { useToast } from '@/hooks/use-toast'
+import { HomeTab, fmtMoney } from '@/components/trading/HomeTab'
 import { BotTab } from '@/components/trading/BotTab'
 import { TradesTab } from '@/components/trading/TradesTab'
 import { SettingsTab } from '@/components/trading/SettingsTab'
@@ -18,6 +20,8 @@ const TABS: { id: Tab; label: string; icon: typeof Home }[] = [
   { id: 'settings', label: 'تنظیمات', icon: Settings },
 ]
 
+type TradePhase = 'open' | 'win' | 'loss' | 'draw'
+
 export default function App() {
   const [state, setState] = useState<FullState | null>(null)
   const [tick, setTick] = useState<Tick | null>(null)
@@ -25,6 +29,8 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('home')
   const [connected, setConnected] = useState(false)
   const socketRef = useRef<ReturnType<typeof connectEngine> | null>(null)
+  const phasesRef = useRef<Map<string, TradePhase>>(new Map())
+  const { toast } = useToast()
 
   useEffect(() => {
     const socket = connectEngine({
@@ -33,6 +39,9 @@ export default function App() {
         if (s.tick) setTick(s.tick)
       },
       onTick: (t: Tick) => setTick(t),
+      onError: (m: string) => {
+        toast({ title: 'خطا', description: m, variant: 'destructive' })
+      },
     })
     socket.on('connect', () => setConnected(true))
     socket.on('disconnect', () => setConnected(false))
@@ -63,6 +72,48 @@ export default function App() {
   const closeTrade = useCallback((id: string) => {
     socketRef.current?.emit('close-trade', id)
   }, [])
+
+  const manualTrade = useCallback((d: 'BUY' | 'SELL') => {
+    socketRef.current?.emit('manual-trade', d)
+  }, [])
+
+  // ─── trade lifecycle alerts: toast + sound + vibration ───
+  useEffect(() => {
+    if (!state) return
+    const phases = phasesRef.current
+    const sound = state.settings.soundEnabled
+    for (const t of state.trades) {
+      const before = phases.get(t.id)
+      if (!before) {
+        if (t.status === 'open') {
+          // only announce trades that opened while we are watching (no history replay)
+          if (Date.now() - t.openTime < 6000) {
+            playTradeOpen(sound)
+            toast({
+              title: `${t.direction === 'BUY' ? 'خرید' : 'فروش'} XAUUSD باز شد`,
+              description: `حجم: ${t.stake > 0 ? `$${t.stake}` : `${t.lots} لات`} • ورود: ${t.openPrice.toFixed(2)} • بستن در ${t.durationSec} ثانیه`,
+            })
+          }
+          phases.set(t.id, 'open')
+        } else {
+          phases.set(t.id, t.result === 'WIN' ? 'win' : t.result === 'LOSS' ? 'loss' : 'draw')
+        }
+      } else if (before === 'open' && t.status === 'closed') {
+        const win = t.result === 'WIN'
+        const draw = t.result === 'DRAW'
+        if (win) playWin(sound)
+        else if (t.result === 'LOSS') playLoss(sound)
+        toast({
+          title: win ? 'برد! ✓' : draw ? 'خنثی' : 'باخت ✗',
+          description: `${t.direction === 'BUY' ? 'خرید' : 'فروش'} XAUUSD — سود/زیان: ${fmtMoney(t.pnl ?? 0, true)}`,
+        })
+        phases.set(t.id, win ? 'win' : draw ? 'draw' : 'loss')
+      }
+    }
+    if (phases.size > 100) {
+      phasesRef.current = new Map([...phases.entries()].slice(-50))
+    }
+  }, [state, toast])
 
   if (!state) {
     return (
@@ -101,7 +152,7 @@ export default function App() {
 
       {/* Content */}
       <div className="flex-1 px-3 py-3">
-        {tab === 'home' && <HomeTab state={state} tick={tick} now={now} />}
+        {tab === 'home' && <HomeTab state={state} tick={tick} now={now} onManualTrade={manualTrade} />}
         {tab === 'bot' && <BotTab state={state} now={now} onToggleBot={toggleBot} onSetDuration={d => patch({ tradeDurationSec: d })} />}
         {tab === 'trades' && <TradesTab state={state} now={now} onCloseTrade={closeTrade} />}
         {tab === 'settings' && <SettingsTab state={state} onPatch={patch} onReset={resetAccount} />}

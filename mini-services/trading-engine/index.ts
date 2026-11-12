@@ -46,12 +46,18 @@ io.on('connection', socket => {
       if (patch.metaapiAccountId !== undefined) safe.metaapiAccountId = String(patch.metaapiAccountId).slice(0, 100)
       if (patch.metaapiRegion !== undefined) safe.metaapiRegion = String(patch.metaapiRegion).slice(0, 40)
       if (patch.botRunning !== undefined) safe.botRunning = Boolean(patch.botRunning)
+      if (patch.soundEnabled !== undefined) safe.soundEnabled = Boolean(patch.soundEnabled)
       engine.updateSettings(safe)
     } catch (e: any) {
       socket.emit('error-msg', e?.message || 'خطا در ذخیره تنظیمات')
     }
   })
 
+  socket.on('manual-trade', (direction: string) => {
+    const d = String(direction).toUpperCase() === 'SELL' ? 'SELL' : 'BUY'
+    const r = engine.openManualTrade(d)
+    if (!r.ok) socket.emit('error-msg', r.reason || 'معامله دستی رد شد')
+  })
   socket.on('reset-account', () => engine.resetAccount())
   socket.on('close-trade', (id: string) => engine.closeTradeManually(String(id).slice(0, 40)))
   socket.on('get-state', () => socket.emit('state', engine.snapshot()))

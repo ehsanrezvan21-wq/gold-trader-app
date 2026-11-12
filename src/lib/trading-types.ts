@@ -21,6 +21,7 @@ export interface BotSettings {
   metaapiAccountId: string
   metaapiRegion: string
   botRunning: boolean
+  soundEnabled: boolean
 }
 
 export interface Trade {

@@ -28,6 +28,7 @@ export const DEFAULT_SETTINGS: BotSettings = {
   metaapiAccountId: '',
   metaapiRegion: 'new-york',
   botRunning: false,
+  soundEnabled: true,
 }
 
 interface PersistState {
@@ -179,6 +180,22 @@ export class TradingEngine {
     } else {
       this.settleDemo(trade, this.tick?.price ?? trade.openPrice)
     }
+  }
+
+  /** Manual BUY/SELL from the user, bypassing the AI confidence gate but respecting risk limits. */
+  openManualTrade(direction: 'BUY' | 'SELL'): { ok: boolean; reason?: string } {
+    const check = this.canOpen()
+    if (!check.ok) {
+      this.log('warn', `معامله دستی رد شد — ${check.reason}`)
+      this.onEmit()
+      return { ok: false, reason: check.reason }
+    }
+    const r = this.tryOpenTrade(direction, 100, 'معامله دستی کاربر', 'MANUAL')
+    if (r.ok) {
+      this.log('success', `معامله دستی ${direction === 'BUY' ? 'خرید' : 'فروش'} XAUUSD باز شد — بستن خودکار در ${this.settings.tradeDurationSec} ثانیه`)
+    }
+    this.onEmit()
+    return { ok: r.ok, reason: r.ok ? undefined : 'ظرفیت تکمیل است' }
   }
 
   // ─── internals ───
@@ -334,7 +351,7 @@ export class TradingEngine {
     return { ok: true }
   }
 
-  private tryOpenTrade(direction: 'BUY' | 'SELL', confidence: number, reason: string): { ok: boolean; trade?: Trade } {
+  private tryOpenTrade(direction: 'BUY' | 'SELL', confidence: number, reason: string, comment?: string): { ok: boolean; trade?: Trade } {
     const check = this.canOpen()
     if (!check.ok) return { ok: false }
     const now = Date.now()
@@ -348,7 +365,7 @@ export class TradingEngine {
       status: 'open',
       confidence,
       aiReason: reason,
-      comment: `AI ${confidence}%`,
+      comment: comment ?? `AI ${confidence}%`,
     }
 
     if (this.settings.mode === 'demo') {

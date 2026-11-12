@@ -37,6 +37,8 @@ export interface BotSettings {
   metaapiRegion: string
   /** is the auto-bot enabled */
   botRunning: boolean
+  /** play sounds / vibration on trade events */
+  soundEnabled: boolean
 }
 
 export interface Trade {
