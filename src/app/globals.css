@@ -1,0 +1,163 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-vazir);
+  --font-mono: var(--font-vazir);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-gold: var(--gold);
+  --color-gold-soft: var(--gold-soft);
+  --color-profit: var(--profit);
+  --color-loss: var(--loss);
+}
+
+:root {
+  --radius: 0.75rem;
+  --background: #0c0a09;
+  --foreground: #f5f0e8;
+  --card: #171310;
+  --card-foreground: #f5f0e8;
+  --popover: #1c1712;
+  --popover-foreground: #f5f0e8;
+  --primary: #f5b52a;
+  --primary-foreground: #171310;
+  --secondary: #26201a;
+  --secondary-foreground: #f5f0e8;
+  --muted: #26201a;
+  --muted-foreground: #a89d8d;
+  --accent: #26201a;
+  --accent-foreground: #f5f0e8;
+  --destructive: #f4536b;
+  --border: #2c251e;
+  --input: #2c251e;
+  --ring: #f5b52a;
+  --chart-1: #f5b52a;
+  --chart-2: #35c98e;
+  --chart-3: #f4536b;
+  --chart-4: #e0c084;
+  --chart-5: #8d7b5e;
+  --sidebar: #171310;
+  --sidebar-foreground: #f5f0e8;
+  --sidebar-primary: #f5b52a;
+  --sidebar-primary-foreground: #171310;
+  --sidebar-accent: #26201a;
+  --sidebar-accent-foreground: #f5f0e8;
+  --sidebar-border: #2c251e;
+  --sidebar-ring: #f5b52a;
+  --gold: #f5b52a;
+  --gold-soft: #f7d77e;
+  --profit: #35c98e;
+  --loss: #f4536b;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(245, 181, 42, 0.09), transparent),
+      radial-gradient(ellipse 60% 40% at 90% 110%, rgba(245, 181, 42, 0.05), transparent);
+    background-attachment: fixed;
+    overscroll-behavior-y: none;
+  }
+  ::selection {
+    background: rgba(245, 181, 42, 0.3);
+  }
+}
+
+/* slim scrollbars, mobile-app feel */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3a322a transparent;
+}
+*::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #3a322a;
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* gold glow utilities */
+.gold-glow {
+  box-shadow: 0 0 24px rgba(245, 181, 42, 0.18), inset 0 1px 0 rgba(245, 181, 42, 0.15);
+}
+.gold-text {
+  background: linear-gradient(120deg, #f7d77e 0%, #f5b52a 45%, #d9930f 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.8); }
+}
+.live-dot {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+@keyframes flash-win {
+  0% { background-color: rgba(53, 201, 142, 0.25); }
+  100% { background-color: transparent; }
+}
+@keyframes flash-loss {
+  0% { background-color: rgba(244, 83, 107, 0.25); }
+  100% { background-color: transparent; }
+}
+.flash-win { animation: flash-win 1.6s ease-out; }
+.flash-loss { animation: flash-loss 1.6s ease-out; }
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}

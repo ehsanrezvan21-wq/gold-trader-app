@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "# Description of the Screen Recording\n\n## 1) What app/interface is shown\nThis is a **camera/screen recording of a video being played** (note the video player controls: pause button, timestamp ~0:00/0:38, mute icon, and thumbnail strip at the bottom — appears to be a phone gallery or social media video player). The video itself shows:\n- A **physical Android phone** (Samsung, dark wallpaper with circular punch-hole camera) standing in front of a **Dell laptop**, running what appears to be **MetaTrader 4/5 mobile app** (the \"Trade\" screen with Balance/Equity/Free margin layout is characteristic of MT4/MT5).\n- The **laptop screen** shows a web-based trading bot dashboard in a browser (Opera), with URL containing something like \"Downloads/Quetta Trader GOLD Simulation 1...\"\n- The video is watermarked \"**Live bot trading**\" in red diagonal text and \"**@ABDUL915252**\" (Instagram handle) — clearly promotional content for a trading bot service.\n\n## 2) UI layout, colors, design\n- **Phone (MT app):** White/light background, minimal dark text. Top bar labeled \"Trade\" with a hamburger menu. Lists Balance, Equity, Free margin. Bottom navigation with ~5 tabs (Quotes, Charts, Trade, History, Messages) — the Trade tab is active with a red badge notification on the last icon.\n- **Laptop dashboard:** Dark/black theme with yellow/gold accents (fitting the \"GOLD\" trading theme), green (+profit) and red (SELL/loss) text. A yellow-highlighted \"Trades\" tab at the bottom nav. Top banner frame 1 shows a crown icon with \"QUETTA TRADER\" VIP badge, a large \"$1.00\" balance in yellow, \"+$0.00\" in green, \"247\" stat, Instagram logo, and an \"Auto Bot / Bot Send Bot / Turbo Mode 0M +60 Sec Close\" panel with a \"Paused\" status.\n- **Surroundings:** Dell laptop keyboard, browser bookmarks bar (Booking.com, Amazon, eBay, Facebook, YouTube), Windows taskbar, Opera browser.\n\n## 3) Trading features visible\n- **MT mobile app:** Account metrics (Balance, Equity, Free margin), open positions list with symbol **XAUUSDm** (gold, Exness-style \"m\" suffix), lot size **sell 0.01**, entry/exit prices (e.g., 4 354.619 → 4 354.941), and per-trade P/L (-0.32, -0.26, -0.25 etc.). Tab badge shows growing open-trade count (0 → 5 → 05).\n- **Bot dashboard:** \"ACTIVE TRADES\" feed with entries like \"**XAUUSD/GOLD BUY $50 + $104.14 (CLOSED In 32s)**\", \"XAUUSD/GOLD BUY $50 +$293.26 (CLOSED In 46s)\", BUY/SELL signals with confidence-like percentages (\"95% win... $2153.43\"), \"$50\" stake rows with gold/yellow progress bars, \"+$11.36 / +$27.23\" green profits, countdowns (\"8s Left\", \"7s Left\", \"56s Left\"), and bottom nav: Home, Bot, Trades, Update, Settings.\n- Essentially an **automated gold trading bot** (Turbo Mode, auto open/close in ~30–60 sec) mirrored across web dashboard and MT4/5 mobile.\n\n## 4) Language & key texts\nAll in **English**: \"Live bot trading\", \"QUETTA TRADER\", \"Balance / Equity / Free margin\", \"XAUUSDm sell 0.01\", \"Auto Bot\", \"Turbo Mode 0M +60 Sec Close\", \"Paused\", \"ACTIVE TRADES\", \"BUY $50\", \"CLOSED In 32s\", \"Bot Send Bot\", \"@ABDUL915252\". Phone status bar shows Urdu/Arabic-script text (Pakistani user). Player timestamp counts in Urdu numerals (۰:۰۰ / ۰:۳۸).\n\n## 5) Flow / changes across frames\n1. **Frame 1 (0:00):** Bot dashboard intro — $1.00 balance, Auto Bot \"Paused\", Instagram watermark on dashboard.\n2. **Frame 2 (~0:10):** Dashboard scrolled to \"ACTIVE TRADES\" — closed winning trades (+$104, +$293) and new BUY/SELL signals; a finger appears reaching toward the laptop; phone still shows flat 1.00/1.00/1.00 account.\n3. **Frame 3 (~0:16):** Dashboard in \"Trades\" tab with $50 stake rows and SELL countdowns; phone now shows an **open XAUUSDm sell 0.01 trade at -0.25**, equity dropped to 0.75 — trades now firing live.\n4. **Frame 4 (~0:22):** Phone balance jumped to **5.07/5.07** (position closed in profit); dashboard shows BUY/SELL rows with green +$11–24 profits.\n5. **Frame 5 (~0:27):** Phone balance now **23.70**, five stacked XAUUSDm sell positions each slightly negative (-0.26/-0.32); dashboard shows multiple $50 trades running with timers. \n\n**Overall narrative:** the video portrays a $1 account being rapidly grown (~$1 → ~$23) by an automated XAUUSD \"Turbo\" bot placing quick 30–60 second gold trades, advertised via Instagram (@ABDUL915252) — a format typical of bot-selling/giveaway promotion videos, with profits that appear selectively curated between shots.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1794460375,
+  "id": "20261112131229111881334a674abb",
+  "model": "glm-5.3-flash",
+  "object": "chat.completion",
+  "request_id": "20261112131229111881334a674abb",
+  "usage": {
+    "completion_tokens": 1232,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 4307,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 5539
+  }
+}
