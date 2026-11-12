@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BotSettings, FullState, Tick } from '@/lib/trading-types'
+import { symbolFa } from '@/lib/trading-types'
 import { connectEngine } from '@/lib/engine-socket'
 import { playTradeOpen, playWin, playLoss } from '@/lib/alerts'
 import { useToast } from '@/hooks/use-toast'
@@ -48,6 +49,10 @@ export default function App() {
           if (s.tick) setTick(s.tick)
         },
         onTick: (t: Tick) => setTick(t),
+        onTicks: (all: Record<string, Tick>) => {
+          // merge the multi-symbol stream into the state copy for the chips
+          setState(prev => (prev ? { ...prev, symbolTicks: { ...prev.symbolTicks, ...all } } : prev))
+        },
         onError: (m: string) => {
           toast({ title: 'خطا', description: m, variant: 'destructive' })
         },
@@ -84,8 +89,12 @@ export default function App() {
     socketRef.current?.emit('close-trade', id)
   }, [])
 
-  const manualTrade = useCallback((d: 'BUY' | 'SELL') => {
-    socketRef.current?.emit('manual-trade', d)
+  const setSymbol = useCallback((s: string) => {
+    socketRef.current?.emit('set-symbol', s)
+  }, [])
+
+  const manualTrade = useCallback((d: 'BUY' | 'SELL', symbol: string) => {
+    socketRef.current?.emit('manual-trade', d, symbol)
   }, [])
 
   // reconnect watchdog: if the socket drops for a while, re-boot the engine and retry
@@ -110,7 +119,7 @@ export default function App() {
           if (Date.now() - t.openTime < 6000) {
             playTradeOpen(sound)
             toast({
-              title: `${t.direction === 'BUY' ? 'خرید' : 'فروش'} XAUUSD باز شد`,
+              title: `${t.direction === 'BUY' ? 'خرید' : 'فروش'} ${symbolFa(t.symbol)} باز شد`,
               description: `حجم: ${t.stake > 0 ? `$${t.stake}` : `${t.lots} لات`} • ورود: ${t.openPrice.toFixed(2)} • بستن در ${t.durationSec} ثانیه`,
             })
           }
@@ -125,7 +134,7 @@ export default function App() {
         else if (t.result === 'LOSS') playLoss(sound)
         toast({
           title: win ? 'برد! ✓' : draw ? 'خنثی' : 'باخت ✗',
-          description: `${t.direction === 'BUY' ? 'خرید' : 'فروش'} XAUUSD — سود/زیان: ${fmtMoney(t.pnl ?? 0, true)}`,
+          description: `${t.direction === 'BUY' ? 'خرید' : 'فروش'} ${symbolFa(t.symbol)} — سود/زیان: ${fmtMoney(t.pnl ?? 0, true)}`,
         })
         phases.set(t.id, win ? 'win' : draw ? 'draw' : 'loss')
       }
@@ -156,7 +165,7 @@ export default function App() {
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-b from-[#f7d77e] to-[#f5b52a] text-lg font-black text-[#171310]">G</div>
             <div>
               <h1 className="text-sm font-black leading-5">گلد بات <span className="text-[#f5b52a]">تریدر</span></h1>
-              <p className="text-[10px] leading-4 text-[#a89d8d]">ربات هوشمند طلا • AI + MT5</p>
+              <p className="text-[10px] leading-4 text-[#a89d8d]">ربات هوشمند معامله • طلا، بیت‌کوین، یورو • AI + MT5</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -172,7 +181,7 @@ export default function App() {
 
       {/* Content */}
       <div className="flex-1 px-3 py-3">
-        {tab === 'home' && <HomeTab state={state} tick={tick} now={now} onManualTrade={manualTrade} />}
+        {tab === 'home' && <HomeTab state={state} tick={tick} now={now} onManualTrade={manualTrade} onSetSymbol={setSymbol} />}
         {tab === 'bot' && <BotTab state={state} now={now} onToggleBot={toggleBot} onSetDuration={d => patch({ tradeDurationSec: d })} />}
         {tab === 'trades' && <TradesTab state={state} now={now} onCloseTrade={closeTrade} />}
         {tab === 'settings' && <SettingsTab state={state} onPatch={patch} onReset={resetAccount} />}

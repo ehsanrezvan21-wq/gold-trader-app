@@ -19,14 +19,25 @@ const engine = new TradingEngine(() => {
 
 engine.start()
 
-// broadcast high-frequency tick stream on its own event for smooth UI
+// broadcast high-frequency tick stream on its own event for smooth UI.
+// `ticks` carries every symbol; `tick` keeps the active symbol for older clients
 setInterval(() => {
-  if (engine.tick) io.emit('tick', engine.tick)
+  const all = engine.allTicks()
+  io.emit('ticks', all)
+  io.emit('tick', all[engine.snapshot().settings.activeSymbol] ?? null)
 }, 1000)
 
 io.on('connection', socket => {
   // full state sync on connect
   socket.emit('state', engine.snapshot())
+
+  socket.on('set-symbol', (symbol: string) => {
+    try {
+      engine.setActiveSymbol(String(symbol).slice(0, 12).toUpperCase())
+    } catch (e: any) {
+      socket.emit('error-msg', e?.message || 'خطا در تغییر نماد')
+    }
+  })
 
   socket.on('update-settings', (patch: Partial<BotSettings>) => {
     try {
@@ -49,15 +60,16 @@ io.on('connection', socket => {
       if (patch.soundEnabled !== undefined) safe.soundEnabled = Boolean(patch.soundEnabled)
       if (patch.cooldownAfterLossSec !== undefined) safe.cooldownAfterLossSec = Math.max(0, Math.min(300, Number(patch.cooldownAfterLossSec) || 0))
       if (patch.maxConsecutiveLosses !== undefined) safe.maxConsecutiveLosses = Math.max(0, Math.min(20, Math.round(Number(patch.maxConsecutiveLosses) || 0)))
+      if (patch.activeSymbol !== undefined) safe.activeSymbol = String(patch.activeSymbol).slice(0, 12).toUpperCase()
       engine.updateSettings(safe)
     } catch (e: any) {
       socket.emit('error-msg', e?.message || 'خطا در ذخیره تنظیمات')
     }
   })
 
-  socket.on('manual-trade', (direction: string) => {
+  socket.on('manual-trade', (direction: string, symbol?: string) => {
     const d = String(direction).toUpperCase() === 'SELL' ? 'SELL' : 'BUY'
-    const r = engine.openManualTrade(d)
+    const r = engine.openManualTrade(d, symbol ? String(symbol).slice(0, 12).toUpperCase() : undefined)
     if (!r.ok) socket.emit('error-msg', r.reason || 'معامله دستی رد شد')
   })
   socket.on('reset-account', () => engine.resetAccount())

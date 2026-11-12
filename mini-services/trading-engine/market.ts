@@ -1,61 +1,100 @@
-// ─── Market simulator: XAUUSD price engine, candles & technical indicators ───
+// ─── Market simulators: XAUUSD / BTCUSD / EURUSD price engines, candles & indicators ───
 import type { Candle, Tick } from './types'
 
-const SPREAD = 0.35 // USD spread for gold (ask - bid)
-const PIP = 0.1 // gold pip = 0.1 USD
+export const PIP = 0.1 // gold pip = 0.1 USD
+
+export interface SymbolConfig {
+  symbol: string
+  /** Persian label shown in the UI */
+  fa: string
+  startPrice: number
+  /** ask - bid in price units */
+  spread: number
+  /** legacy volatility multiplier (kept for compatibility) */
+  volFactor: number
+  /** display decimals */
+  decimals: number
+  /** short badge for chips */
+  badge: string
+  /** relative per-tick volatility (fraction of price) — keeps walks proportional across symbols */
+  relVol: number
+}
+
+export const SYMBOL_CONFIGS: SymbolConfig[] = [
+  { symbol: 'XAUUSD', fa: 'طلا', startPrice: 2654.25, spread: 0.35, volFactor: 1, decimals: 2, badge: 'طلا', relVol: 0.00019 },
+  { symbol: 'BTCUSD', fa: 'بیت‌کوین', startPrice: 97250, spread: 24, volFactor: 2.2, decimals: 1, badge: 'BTC', relVol: 0.00045 },
+  { symbol: 'EURUSD', fa: 'یورو/دلار', startPrice: 1.0845, spread: 0.00018, volFactor: 0.35, decimals: 5, badge: 'EUR', relVol: 0.000025 },
+]
+
+export function symbolConfig(symbol: string): SymbolConfig {
+  return SYMBOL_CONFIGS.find(s => s.symbol === symbol) ?? SYMBOL_CONFIGS[0]
+}
+
+export function fmtPx(symbol: string, price: number): string {
+  return price.toFixed(symbolConfig(symbol).decimals)
+}
+
+export const SYMBOLS = SYMBOL_CONFIGS.map(s => s.symbol)
 
 /** Random-walk price engine with momentum regimes + occasional spikes. */
 export class MarketSimulator {
-  price = 2654.25
-  dayOpen = this.price
-  high = this.price
-  low = this.price
+  price: number
+  dayOpen: number
+  high: number
+  low: number
   private momentum = 0
   private regime: number = 0 // -1 down, 0 flat, +1 up
   private regimeTicks = 0
+  private relVol: number
+  private cfg: SymbolConfig
 
-  constructor() {
+  constructor(cfg: SymbolConfig) {
+    this.cfg = cfg
+    this.price = cfg.startPrice
+    this.dayOpen = cfg.startPrice
+    this.high = cfg.startPrice
+    this.low = cfg.startPrice
     const hour = new Date().getUTCHours()
     // session-ish volatility: asia quieter, london/ny louder
-    this.baseVol = 0.09 + (hour >= 7 && hour <= 20 ? 0.07 : 0)
+    const session = hour >= 7 && hour <= 20 ? 1.4 : 1
+    this.relVol = cfg.relVol * session
   }
-
-  private baseVol: number
 
   tick(): Tick {
     this.regimeTicks--
     if (this.regimeTicks <= 0) {
-      // pick a new regime: trend persistence ~ realistic gold behavior
+      // pick a new regime: trend persistence ~ realistic behavior
       const r = Math.random()
       this.regime = r < 0.38 ? (Math.random() < 0.5 ? -1 : 1) : 0
       this.regimeTicks = 30 + Math.floor(Math.random() * 90)
     }
 
-    // momentum with mean reversion
-    this.momentum = this.momentum * 0.94 + (Math.random() - 0.5) * this.baseVol * 0.9
-    let drift = this.momentum + this.regime * this.baseVol * 0.22
+    // relative momentum with mean reversion (scales with price so every symbol stays realistic)
+    this.momentum = this.momentum * 0.94 + (Math.random() - 0.5) * this.relVol * 0.9
+    let drift = this.price * (this.momentum + this.regime * this.relVol * 0.22)
 
-    // rare spike (news-like)
-    if (Math.random() < 0.004) {
-      drift += (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 1.4)
+    // rare spike (news-like) — a bit more likely for crypto
+    const spikeP = this.cfg.symbol === 'BTCUSD' ? 0.007 : 0.004
+    if (Math.random() < spikeP) {
+      drift += this.price * this.relVol * (4 + Math.random() * 8) * (Math.random() < 0.5 ? -1 : 1)
     }
 
-    this.price = Math.max(1000, this.price + drift)
+    this.price = Math.max(this.cfg.startPrice * 0.3, this.price + drift)
     this.high = Math.max(this.high, this.price)
     this.low = Math.min(this.low, this.price)
 
-    const bid = +(this.price - SPREAD / 2).toFixed(2)
-    const ask = +(this.price + SPREAD / 2).toFixed(2)
+    const bid = +(this.price - this.cfg.spread / 2).toFixed(this.cfg.decimals + 1)
+    const ask = +(this.price + this.cfg.spread / 2).toFixed(this.cfg.decimals + 1)
     return {
-      price: +this.price.toFixed(2),
+      price: +this.price.toFixed(this.cfg.decimals),
       bid,
       ask,
-      change: +(this.price - this.dayOpen).toFixed(2),
+      change: +(this.price - this.dayOpen).toFixed(this.cfg.decimals),
       changePct: +(((this.price - this.dayOpen) / this.dayOpen) * 100).toFixed(3),
       time: Date.now(),
-      dayOpen: +this.dayOpen.toFixed(2),
-      high: +this.high.toFixed(2),
-      low: +this.low.toFixed(2),
+      dayOpen: +this.dayOpen.toFixed(this.cfg.decimals),
+      high: +this.high.toFixed(this.cfg.decimals),
+      low: +this.low.toFixed(this.cfg.decimals),
     }
   }
 }
@@ -184,4 +223,5 @@ export function computeIndicators(candles: Candle[]) {
   }
 }
 
-export { SPREAD, PIP }
+const SPREAD = 0.35 // legacy gold spread (kept for broker reference)
+export { SPREAD }

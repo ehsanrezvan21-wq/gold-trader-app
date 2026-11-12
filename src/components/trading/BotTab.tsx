@@ -1,6 +1,7 @@
 'use client'
 
 import type { FullState } from '@/lib/trading-types'
+import { symbolFa } from '@/lib/trading-types'
 import { ConfidenceRing } from './ConfidenceRing'
 import { TrendingUp, TrendingDown, Minus, Power, Zap, ScrollText } from 'lucide-react'
 
@@ -119,6 +120,7 @@ export function BotTab({
                         <span className="flex items-center gap-1 rounded-md bg-stone-500/15 px-1.5 py-0.5 text-[10px] font-black text-stone-300"><Minus className="h-3 w-3" /> انتظار</span>
                       )}
                       {sig.acted && <span className="rounded-md bg-[#f5b52a]/15 px-1.5 py-0.5 text-[10px] font-bold text-[#f5b52a]">اجرا شد</span>}
+                      <span className="rounded-md bg-stone-500/15 px-1.5 py-0.5 text-[10px] font-bold text-stone-300">{symbolFa(sig.symbol)}</span>
                       <span className="mr-auto text-[9px] text-[#8d7b5e] tabular-nums">{age < 5 ? 'همین حالا' : `${age} ثانیه پیش`}</span>
                     </div>
                     <p className="mt-1 text-[11px] leading-5 text-[#c9bda9]">{sig.reason}</p>

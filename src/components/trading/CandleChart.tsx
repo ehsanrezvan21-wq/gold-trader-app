@@ -113,7 +113,7 @@ export function CandleChart({ candles, height = 150 }: { candles: Candle[]; heig
       style={{ height, width: '100%' }}
       className="select-none"
       role="img"
-      aria-label="نمودار کندل‌استیک قیمت طلا"
+      aria-label="نمودار کندل‌استیک قیمت"
     />
   )
 }

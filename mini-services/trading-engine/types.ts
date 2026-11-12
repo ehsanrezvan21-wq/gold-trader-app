@@ -43,6 +43,8 @@ export interface BotSettings {
   cooldownAfterLossSec: number
   /** pause the bot automatically after N consecutive losses */
   maxConsecutiveLosses: number
+  /** symbol currently shown in the UI & targeted by GLM analysis + manual trades */
+  activeSymbol: string
 }
 
 export interface Trade {
@@ -74,6 +76,7 @@ export interface Trade {
 export interface AISignal {
   id: string
   time: number
+  symbol: string
   action: SignalAction
   confidence: number
   reason: string
@@ -162,8 +165,12 @@ export interface FullState {
   trades: Trade[]
   signals: AISignal[]
   logs: LogEntry[]
+  /** candles of the active symbol */
   candles: Candle[]
+  /** tick of the active symbol */
   tick: Tick | null
+  /** latest tick of every symbol (for the symbol chips) */
+  symbolTicks: Record<string, Tick | null>
   mt5: MT5AccountInfo | null
   mt5Status: 'disconnected' | 'connecting' | 'connected' | 'error'
   mt5Error: string | null

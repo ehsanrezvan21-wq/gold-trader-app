@@ -1,6 +1,7 @@
 'use client'
 
 import type { FullState, Trade } from '@/lib/trading-types'
+import { fmtPx, symbolFa } from '@/lib/trading-types'
 import { fmtMoney, pnlClass } from './HomeTab'
 import { OpenTradeRow } from './HomeTab'
 import { Trophy, TrendingUp, Download, Flame, Snowflake } from "lucide-react"
@@ -85,9 +86,10 @@ function streakInfo(streak: number): { label: string; cls: string; icon: typeof 
 }
 
 function exportCsv(trades: Trade[]) {
-  const header = ['زمان باز شدن', 'جهت', 'حالت', 'حجم', 'قیمت ورود', 'قیمت خروج', 'نتیجه', 'سود/زیان ($)', 'اطمینان %', 'دلیل AI']
+  const header = ['زمان باز شدن', 'نماد', 'جهت', 'حالت', 'حجم', 'قیمت ورود', 'قیمت خروج', 'نتیجه', 'سود/زیان ($)', 'اطمینان %', 'دلیل AI']
   const rows = trades.map(t => [
     new Date(t.openTime).toISOString(),
+    t.symbol,
     t.direction,
     t.mode === 'demo' ? 'demo' : 'MT5',
     t.stake > 0 ? `$${t.stake}` : `${t.lots} lot`,
@@ -224,7 +226,7 @@ function ClosedTradeRow({ trade }: { trade: Trade }) {
           <span className={`rounded-md px-2 py-0.5 text-[11px] font-black ${buy ? 'bg-[#35c98e]/15 text-[#35c98e]' : 'bg-[#f4536b]/15 text-[#f4536b]'}`}>
             {buy ? 'خرید' : 'فروش'}
           </span>
-          <span className="text-xs font-bold">XAUUSD/GOLD</span>
+          <span className="text-xs font-bold">{symbolFa(trade.symbol)}</span>
           {trade.stake > 0 ? <span className="text-[10px] text-[#a89d8d] tabular-nums">${trade.stake}</span> : <span className="text-[10px] text-[#a89d8d] tabular-nums">{trade.lots} لات</span>}
         </div>
         <span className={`text-sm font-black tabular-nums ${pnlClass(trade.pnl ?? 0)}`}>
@@ -232,8 +234,8 @@ function ClosedTradeRow({ trade }: { trade: Trade }) {
         </span>
       </div>
       <div className="mt-1 flex items-center justify-between text-[10px] text-[#a89d8d] tabular-nums">
-        <span>
-          {time} • {trade.openPrice.toFixed(2)} ← {trade.closePrice?.toFixed(2)}
+        <span dir="ltr">
+          {time} • {fmtPx(trade.symbol, trade.openPrice)} ← {trade.closePrice ? fmtPx(trade.symbol, trade.closePrice) : '—'}
         </span>
         <span className={win ? 'font-bold text-[#35c98e]' : draw ? '' : 'font-bold text-[#f4536b]'}>
           {win ? 'برد' : draw ? 'خنثی' : 'باخت'} — بسته‌شده در {trade.durationSec} ثانیه

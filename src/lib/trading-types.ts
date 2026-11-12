@@ -26,6 +26,8 @@ export interface BotSettings {
   cooldownAfterLossSec: number
   /** pause the bot automatically after N consecutive losses (0 = off) */
   maxConsecutiveLosses: number
+  /** symbol currently shown in the UI & targeted by GLM analysis + manual trades */
+  activeSymbol: string
 }
 
 export interface Trade {
@@ -52,6 +54,7 @@ export interface Trade {
 export interface AISignal {
   id: string
   time: number
+  symbol: string
   action: SignalAction
   confidence: number
   reason: string
@@ -134,7 +137,24 @@ export interface FullState {
   logs: LogEntry[]
   candles: Candle[]
   tick: Tick | null
+  /** latest tick of every symbol (for the symbol chips) */
+  symbolTicks: Record<string, Tick | null>
   mt5: MT5AccountInfo | null
   mt5Status: 'disconnected' | 'connecting' | 'connected' | 'error'
   mt5Error: string | null
+}
+
+// ─── Symbol metadata (mirror of engine SYMBOL_CONFIGS) ───
+export const SYMBOL_META: Record<string, { fa: string; badge: string; decimals: number }> = {
+  XAUUSD: { fa: 'طلا', badge: 'طلا', decimals: 2 },
+  BTCUSD: { fa: 'بیت‌کوین', badge: 'BTC', decimals: 1 },
+  EURUSD: { fa: 'یورو/دلار', badge: 'EUR', decimals: 5 },
+}
+export const SYMBOL_LIST = ['XAUUSD', 'BTCUSD', 'EURUSD']
+export function symbolFa(symbol: string): string {
+  return SYMBOL_META[symbol]?.fa ?? symbol
+}
+export function fmtPx(symbol: string, price: number): string {
+  const d = SYMBOL_META[symbol]?.decimals ?? 2
+  return price.toFixed(d)
 }

@@ -1,15 +1,14 @@
-// ─── Core engine: bot loop, state, risk management, persistence ───
+// ─── Core engine: multi-symbol bot loop, state, risk management, persistence ───
 import fs from 'fs'
 import path from 'path'
 import type {
   AISignal, BotSettings, BotStats, Candle, FullState, LogEntry, Tick, Trade,
 } from './types'
-import { CandleBuilder, MarketSimulator, PIP, computeIndicators } from './market'
+import { CandleBuilder, MarketSimulator, PIP, SYMBOLS, computeIndicators, symbolConfig, fmtPx } from './market'
 import { analyzeMarket, localVerdict } from './ai'
 import { demoSettle, mt5Account, mt5Close, mt5Open, mt5Positions } from './broker'
 
 const STATE_FILE = path.join(__dirname, 'state.json')
-const SYMBOL = 'XAUUSD'
 const MAX_HISTORY = 150
 
 export const DEFAULT_SETTINGS: BotSettings = {
@@ -31,6 +30,7 @@ export const DEFAULT_SETTINGS: BotSettings = {
   soundEnabled: true,
   cooldownAfterLossSec: 12,
   maxConsecutiveLosses: 3,
+  activeSymbol: 'XAUUSD',
 }
 
 export function freshStats(): BotStats {
@@ -79,6 +79,12 @@ function loadState(): PersistState {
   }
 }
 
+interface MarketPack {
+  sim: MarketSimulator
+  b5s: CandleBuilder
+  b1m: CandleBuilder
+}
+
 export class TradingEngine {
   settings: BotSettings = { ...DEFAULT_SETTINGS }
   balance = 100
@@ -91,13 +97,12 @@ export class TradingEngine {
   logs: LogEntry[] = []
   candles: Candle[] = []
   tick: Tick | null = null
+  symbolTicks: Record<string, Tick | null> = {}
   mt5: FullState['mt5'] = null
   mt5Status: FullState['mt5Status'] = 'disconnected'
   mt5Error: string | null = null
 
-  private market = new MarketSimulator()
-  private builder5s = new CandleBuilder(5000, 120)
-  private builder1m = new CandleBuilder(60000, 60)
+  private markets: Record<string, MarketPack> = {}
   private aiBusy = false
   private lastSignalAt = 0
   private rateBackoff = 0
@@ -111,6 +116,7 @@ export class TradingEngine {
     this.onEmit = onEmit
     const persisted = loadState()
     this.settings = persisted.settings
+    if (!SYMBOLS.includes(this.settings.activeSymbol)) this.settings.activeSymbol = 'XAUUSD'
     this.balance = persisted.balance
     this.dayPnl = persisted.dayPnl
     this.dayKey = persisted.dayKey
@@ -118,16 +124,28 @@ export class TradingEngine {
     this.trades = persisted.trades
     if (this.dayKey !== todayKey()) this.resetDay()
 
+    // one simulator + candle builders per symbol
+    for (const sym of SYMBOLS) {
+      this.markets[sym] = {
+        sim: new MarketSimulator(symbolConfig(sym)),
+        b5s: new CandleBuilder(5000, 120),
+        b1m: new CandleBuilder(60000, 60),
+      }
+    }
+
     // prefill market history so the chart is alive from first paint
     let t = Date.now() - 120 * 5000
     for (let i = 0; i < 240; i++) {
-      const tick = this.market.tick()
-      this.builder5s.push(tick.price, t)
-      this.builder1m.push(tick.price, t)
+      for (const sym of SYMBOLS) {
+        const pack = this.markets[sym]
+        const tick = pack.sim.tick()
+        pack.b5s.push(tick.price, t)
+        pack.b1m.push(tick.price, t)
+      }
       t += 2500
     }
-    this.candles = this.builder5s.closed
-    this.log('info', 'موتور ترید راه‌اندازی شد — آماده کار روی XAUUSD (طلا)')
+    this.refreshActiveCandles()
+    this.log('info', `موتور ترید راه‌اندازی شد — ۳ بازار فعال: طلا، بیت‌کوین، یورو/دلار`)
   }
 
   start() {
@@ -147,9 +165,31 @@ export class TradingEngine {
   }
 
   // ─── public API for socket handlers ───
+  /** latest tick of every symbol (for the 1s ticks broadcast) */
+  allTicks(): Record<string, Tick | null> {
+    const out: Record<string, Tick | null> = {}
+    for (const sym of SYMBOLS) out[sym] = this.symbolTicks[sym] ?? null
+    return out
+  }
+
+  /** switch the symbol shown in the UI / analyzed by GLM */
+  setActiveSymbol(symbol: string) {
+    const sym = symbolConfig(symbol).symbol
+    if (sym === this.settings.activeSymbol) return
+    this.settings.activeSymbol = sym
+    this.refreshActiveCandles()
+    this.log('info', `بازار فعال به ${symbolConfig(sym).fa} (${sym}) تغییر کرد`)
+    this.save()
+    this.onEmit()
+  }
+
   updateSettings(patch: Partial<BotSettings>) {
     const prevMode = this.settings.mode
     this.settings = { ...this.settings, ...patch }
+    if (patch.activeSymbol !== undefined && !SYMBOLS.includes(this.settings.activeSymbol)) {
+      this.settings.activeSymbol = 'XAUUSD'
+    }
+    if (patch.activeSymbol !== undefined) this.refreshActiveCandles()
     if (this.settings.mode !== prevMode) {
       this.mt5Error = null
       this.mt5Status = this.settings.mode === 'mt5' ? 'connecting' : 'disconnected'
@@ -191,34 +231,48 @@ export class TradingEngine {
     if (this.settings.mode === 'mt5' && trade.positionId) {
       this.settleMt5(trade, true)
     } else {
-      this.settleDemo(trade, this.tick?.price ?? trade.openPrice)
+      this.settleDemo(trade, this.priceOf(trade.symbol))
     }
   }
 
   /** Manual BUY/SELL from the user, bypassing the AI confidence gate and the post-loss cooldown. */
-  openManualTrade(direction: 'BUY' | 'SELL'): { ok: boolean; reason?: string } {
+  openManualTrade(direction: 'BUY' | 'SELL', symbol?: string): { ok: boolean; reason?: string } {
+    const sym = symbolConfig(symbol || this.settings.activeSymbol).symbol
     const check = this.canOpen()
     if (!check.ok) {
       this.log('warn', `معامله دستی رد شد — ${check.reason}`)
       this.onEmit()
       return { ok: false, reason: check.reason }
     }
-    const r = this.tryOpenTrade(direction, 100, 'معامله دستی کاربر', 'MANUAL', true)
+    const r = this.tryOpenTrade(direction, 100, 'معامله دستی کاربر', 'MANUAL', true, sym)
     if (r.ok) {
-      this.log('success', `معامله دستی ${direction === 'BUY' ? 'خرید' : 'فروش'} XAUUSD باز شد — بستن خودکار در ${this.settings.tradeDurationSec} ثانیه`)
+      this.log('success', `معامله دستی ${direction === 'BUY' ? 'خرید' : 'فروش'} ${symbolConfig(sym).fa} باز شد — بستن خودکار در ${this.settings.tradeDurationSec} ثانیه`)
     }
     this.onEmit()
     return { ok: r.ok, reason: r.ok ? undefined : r.reason }
   }
 
   // ─── internals ───
+  private priceOf(symbol: string): number {
+    const t = this.symbolTicks[symbol]
+    if (t) return t.price
+    return this.markets[symbol]?.sim.price ?? 0
+  }
+
+  private refreshActiveCandles() {
+    const pack = this.markets[this.settings.activeSymbol]
+    if (!pack) return
+    this.candles = pack.b5s.closed
+    this.tick = this.symbolTicks[this.settings.activeSymbol] ?? null
+  }
+
   private resetDay() {
     this.dayKey = todayKey()
     this.dayPnl = 0
     this.stats.todayTrades = 0
     this.stats.todayPnl = 0
     this.pausedReason = null
-    this.market.dayOpen = this.market.price
+    for (const sym of SYMBOLS) this.markets[sym].sim.dayOpen = this.markets[sym].sim.price
   }
 
   private log(level: LogEntry['level'], message: string) {
@@ -248,12 +302,16 @@ export class TradingEngine {
     } catch { /* best effort */ }
   }
 
-  private emitTick() {
-    const tick = this.market.tick()
-    this.builder5s.push(tick.price)
-    this.builder1m.push(tick.price)
-    this.candles = this.builder5s.closed
-    this.tick = tick
+  private emitTicks() {
+    for (const sym of SYMBOLS) {
+      const pack = this.markets[sym]
+      const tick = pack.sim.tick()
+      pack.b5s.push(tick.price)
+      pack.b1m.push(tick.price)
+      this.symbolTicks[sym] = tick
+    }
+    this.candles = this.markets[this.settings.activeSymbol].b5s.closed
+    this.tick = this.symbolTicks[this.settings.activeSymbol] ?? null
   }
 
   private onTick() {
@@ -261,19 +319,18 @@ export class TradingEngine {
       this.resetDay()
       this.log('info', 'روز معاملاتی جدید — آمار روزانه صفر شد')
     }
-    this.emitTick()
+    this.emitTicks()
 
-    // settle due turbo trades
+    // settle due turbo trades (each with its own symbol's price)
     const now = Date.now()
     for (const trade of this.trades.filter(t => t.status === 'open')) {
       if (trade.mode === 'demo' && now >= trade.closeTime) {
-        this.settleDemo(trade, this.tick?.price ?? trade.openPrice)
+        this.settleDemo(trade, this.priceOf(trade.symbol))
       } else if (trade.mode === 'mt5' && trade.positionId && now >= trade.closeTime) {
         this.settleMt5(trade, false)
       }
     }
 
-    // MT5 open trades: update current PnL into equity
     this.onEmit()
   }
 
@@ -284,12 +341,16 @@ export class TradingEngine {
     if (Date.now() - this.lastSignalAt < this.settings.signalIntervalSec * 1000) return
     this.aiBusy = true
     try {
-      const candles = this.builder1m.closed.slice(-40)
+      const activeSym = this.settings.activeSymbol
+
+      // 1) GLM deep analysis of the active symbol (rate-limit aware)
+      let glmRan = false
       const glmReady = Date.now() - this.lastGlmTryAt >= this.rateBackoff * 1000
       if (glmReady) {
         this.lastGlmTryAt = Date.now()
         try {
-          const verdict = await analyzeMarket(candles)
+          const candles = this.markets[activeSym].b1m.closed.slice(-40)
+          const verdict = await analyzeMarket(candles, activeSym)
           this.rateBackoff = 0
           // If GLM hesitates (HOLD) but technicals clearly lean one way, follow the technical signal
           let final = verdict
@@ -299,8 +360,8 @@ export class TradingEngine {
               final = { ...local, reason: `${local.reason} — تأیید تکنیکال` }
             }
           }
-          this.applyVerdict(final, 'AI')
-          return
+          this.applyVerdict(final, 'AI', activeSym)
+          glmRan = true
         } catch (e: any) {
           const msg = String(e?.message || 'نامشخص')
           const rateLimited = msg.includes('429') || msg.toLowerCase().includes('too many')
@@ -311,12 +372,17 @@ export class TradingEngine {
           this.log('info', `AI در دسترس نیست (${rateLimited ? 'محدودیت نرخ' : 'خطا'}) — ادامه با تحلیل تکنیکال`)
         }
       }
-      // GLM cooling down or failed: keep the turbo loop alive with technicals
-      try {
-        const verdict = localVerdict(candles)
-        this.applyVerdict(verdict, 'تکنیکال')
-      } catch (e: any) {
-        this.log('error', `خطای تحلیل تکنیکال: ${e?.message || 'نامشخص'}`)
+
+      // 2) technical scan of the other symbols so the bot never misses opportunities
+      for (const sym of SYMBOLS) {
+        if (sym === activeSym && glmRan) continue
+        try {
+          const candles = this.markets[sym].b1m.closed.slice(-40)
+          const verdict = localVerdict(candles)
+          this.applyVerdict(verdict, 'تکنیکال', sym)
+        } catch (e: any) {
+          this.log('error', `خطای تحلیل تکنیکال ${symbolConfig(sym).fa}: ${e?.message || 'نامشخص'}`)
+        }
       }
     } finally {
       this.aiBusy = false
@@ -325,14 +391,19 @@ export class TradingEngine {
     }
   }
 
-  private applyVerdict(verdict: { action: 'BUY' | 'SELL' | 'HOLD'; confidence: number; reason: string; indicators: ReturnType<typeof computeIndicators> }, source: 'AI' | 'تکنیکال') {
-    const price = this.tick?.price ?? this.market.price
+  private applyVerdict(
+    verdict: { action: 'BUY' | 'SELL' | 'HOLD'; confidence: number; reason: string; indicators: ReturnType<typeof computeIndicators> },
+    source: 'AI' | 'تکنیکال',
+    symbol: string,
+  ) {
+    const cfg = symbolConfig(symbol)
+    const price = this.priceOf(symbol)
 
     let acted = false
     let actedTrade: Trade | null = null
     let blockedReason: string | undefined
     if (verdict.action !== 'HOLD' && verdict.confidence >= this.settings.minConfidence && this.settings.botRunning) {
-      const r = this.tryOpenTrade(verdict.action as 'BUY' | 'SELL', verdict.confidence, verdict.reason)
+      const r = this.tryOpenTrade(verdict.action as 'BUY' | 'SELL', verdict.confidence, verdict.reason, undefined, false, symbol)
       acted = r.ok
       actedTrade = r.trade ?? null
       blockedReason = r.reason
@@ -341,6 +412,7 @@ export class TradingEngine {
     const signal: AISignal = {
       id: Math.random().toString(36).slice(2),
       time: Date.now(),
+      symbol,
       action: verdict.action,
       confidence: verdict.confidence,
       reason: verdict.reason,
@@ -348,6 +420,7 @@ export class TradingEngine {
       indicators: verdict.indicators,
       acted,
     }
+    // keep signal history: prefer mixing symbols but recent-first ordering stays
     this.signals.unshift(signal)
     if (this.signals.length > 30) this.signals.pop()
 
@@ -357,8 +430,8 @@ export class TradingEngine {
       : verdict.confidence >= this.settings.minConfidence
         ? ` (${blockedReason || 'بات غیرفعال یا ظرفیت تکمیل'})`
         : ` (زیر حد اطمینان ${this.settings.minConfidence}%)`
-    this.log(source === 'AI' ? 'ai' : 'info', `${label}: ${verdict.action === 'BUY' ? 'خرید' : verdict.action === 'SELL' ? 'فروش' : 'انتظار'} — اطمینان ${verdict.confidence}٪ — ${verdict.reason}${tag}`)
-    if (actedTrade) this.log('success', `معامله ${verdict.action === 'BUY' ? 'خرید' : 'فروش'} XAUUSD با حجم $${actedTrade.stake} باز شد — هدف: ${actedTrade.durationSec} ثانیه`)
+    this.log(source === 'AI' ? 'ai' : 'info', `${label} [${cfg.fa}]: ${verdict.action === 'BUY' ? 'خرید' : verdict.action === 'SELL' ? 'فروش' : 'انتظار'} — اطمینان ${verdict.confidence}٪ — ${verdict.reason}${tag}`)
+    if (actedTrade) this.log('success', `معامله ${verdict.action === 'BUY' ? 'خرید' : 'فروش'} ${cfg.fa} با حجم $${actedTrade.stake} باز شد — هدف: ${actedTrade.durationSec} ثانیه`)
   }
 
   private canOpen(includeCooldown = false): { ok: boolean; reason?: string } {
@@ -386,13 +459,13 @@ export class TradingEngine {
     return { ok: true }
   }
 
-  private tryOpenTrade(direction: 'BUY' | 'SELL', confidence: number, reason: string, comment?: string, skipCooldown = false): { ok: boolean; reason?: string; trade?: Trade } {
+  private tryOpenTrade(direction: 'BUY' | 'SELL', confidence: number, reason: string, comment?: string, skipCooldown = false, symbol = this.settings.activeSymbol): { ok: boolean; reason?: string; trade?: Trade } {
     const check = this.canOpen(!skipCooldown)
     if (!check.ok) return { ok: false, reason: check.reason }
     const now = Date.now()
     const base: Omit<Trade, 'openPrice' | 'mode' | 'positionId' | 'lots' | 'stake'> = {
       id: Math.random().toString(36).slice(2),
-      symbol: SYMBOL,
+      symbol,
       direction,
       openTime: now,
       closeTime: now + this.settings.tradeDurationSec * 1000,
@@ -404,7 +477,7 @@ export class TradingEngine {
     }
 
     if (this.settings.mode === 'demo') {
-      const trade: Trade = { ...base, mode: 'demo', stake: this.settings.stake, lots: 0, openPrice: this.tick?.price ?? this.market.price }
+      const trade: Trade = { ...base, mode: 'demo', stake: this.settings.stake, lots: 0, openPrice: this.priceOf(symbol) }
       this.trades.unshift(trade)
       if (this.trades.length > MAX_HISTORY) this.trades.pop()
       this.save()
@@ -412,16 +485,16 @@ export class TradingEngine {
     }
 
     // MT5 real mode
-    const trade: Trade = { ...base, mode: 'mt5', stake: 0, lots: this.settings.mt5Lots, openPrice: this.tick?.price ?? this.market.price }
+    const trade: Trade = { ...base, mode: 'mt5', stake: 0, lots: this.settings.mt5Lots, openPrice: this.priceOf(symbol) }
     // optimistic insert; confirm with API
     this.trades.unshift(trade)
     if (this.trades.length > MAX_HISTORY) this.trades.pop()
-    mt5Open(this.settings, direction, base.comment)
+    mt5Open(this.settings, direction, base.comment, symbol)
       .then(res => {
         if (res.ok) {
           trade.positionId = res.positionId
           trade.openPrice = res.openPrice ?? trade.openPrice
-          this.log('success', `سفارش واقعی ${direction} روی MT5 ثبت شد (حجم ${this.settings.mt5Lots} لات)`)
+          this.log('success', `سفارش واقعی ${direction} روی MT5 ثبت شد (${symbolConfig(symbol).fa}، حجم ${this.settings.mt5Lots} لات)`)
         } else {
           trade.status = 'closed'
           trade.result = 'DRAW'
@@ -436,7 +509,7 @@ export class TradingEngine {
 
   private settleDemo(trade: Trade, closePrice: number) {
     trade.status = 'closed'
-    trade.closePrice = +closePrice.toFixed(2)
+    trade.closePrice = +closePrice.toFixed(symbolConfig(trade.symbol).decimals)
     const result = demoSettle(trade.direction, trade.openPrice, trade.closePrice)
     trade.result = result
     trade.pnl = result === 'WIN' ? +(trade.stake * this.settings.payout).toFixed(2)
@@ -444,7 +517,7 @@ export class TradingEngine {
     this.balance = +(this.balance + (trade.pnl ?? 0)).toFixed(2)
     this.applyTradeResult(trade)
     this.log(result === 'WIN' ? 'success' : 'warn',
-      `معامله ${result === 'WIN' ? 'برد ✚' : 'باخت ✖'} — ${trade.direction} XAUUSD — سود/زیان: ${trade.pnl >= 0 ? '+' : ''}$${trade.pnl} (بسته شده در ${trade.durationSec} ثانیه)`)
+      `معامله ${result === 'WIN' ? 'برد ✚' : 'باخت ✖'} — ${trade.direction} ${symbolConfig(trade.symbol).fa} — سود/زیان: ${trade.pnl >= 0 ? '+' : ''}$${trade.pnl} (بسته شده در ${trade.durationSec} ثانیه)`)
     if (result === 'LOSS' && this.settings.cooldownAfterLossSec > 0) {
       this.log('info', `استراحت ${this.settings.cooldownAfterLossSec} ثانیه‌ای بعد از باخت فعال شد`)
     }
@@ -571,6 +644,7 @@ export class TradingEngine {
       logs: this.logs,
       candles: this.candles,
       tick: this.tick,
+      symbolTicks: this.symbolTicks,
       mt5: this.mt5,
       mt5Status: this.settings.mode === 'demo' ? 'disconnected' : this.mt5Status,
       mt5Error: this.mt5Error,
@@ -578,4 +652,4 @@ export class TradingEngine {
   }
 }
 
-export { SYMBOL, PIP, computeIndicators }
+export { PIP, computeIndicators, fmtPx }

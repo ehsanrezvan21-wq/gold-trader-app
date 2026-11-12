@@ -1,6 +1,6 @@
 // ─── AI analyst: GLM model reads market snapshot & returns a trading verdict ───
 import type { Candle } from './types'
-import { computeIndicators } from './market'
+import { computeIndicators, symbolConfig } from './market'
 
 export interface AIVerdict {
   action: 'BUY' | 'SELL' | 'HOLD'
@@ -18,7 +18,7 @@ async function getZAI() {
   return zaiInstance
 }
 
-const SYSTEM_PROMPT = `تو یک تحلیل‌گر حرفه‌ای معاملات طلا (XAUUSD) هستی که برای یک ربات معامله‌گر خودکار حالت توربو کار می‌کنی.
+const SYSTEM_PROMPT = (symbol: string, fa: string) => `تو یک تحلیل‌گر حرفه‌ای معاملات ${fa} (${symbol}) هستی که برای یک ربات معامله‌گر خودکار حالت توربو کار می‌کنی.
 بر اساس داده‌های کندل‌ها و اندیکاتورهای تکنیکال، جهت احتمالی حرکت کوتاه‌مدت (۳۰ تا ۶۰ ثانیه آینده) را پیش‌بینی کن.
 
 قوانین:
@@ -31,15 +31,16 @@ const SYSTEM_PROMPT = `تو یک تحلیل‌گر حرفه‌ای معاملا�
 - confidence: ست‌آپ قوی = ۷۵ تا ۹۵، ست‌آپ متوسط = ۶۲ تا ۷۵، مردد = ۵۰ تا ۶۲.
 - reason باید حداکثر ۱۲ کلمه باشد و به ذکر حداقل یکی از اندیکاتورها بپردازد.`
 
-export async function analyzeMarket(candles: Candle[]): Promise<AIVerdict & { indicators: ReturnType<typeof computeIndicators> }> {
+export async function analyzeMarket(candles: Candle[], symbol = 'XAUUSD'): Promise<AIVerdict & { indicators: ReturnType<typeof computeIndicators> }> {
   const indicators = computeIndicators(candles)
+  const cfg = symbolConfig(symbol)
   const recent = candles.slice(-24)
-  const closes = recent.map(c => c.c.toFixed(2)).join(', ')
+  const closes = recent.map(c => c.c.toFixed(cfg.decimals)).join(', ')
 
-  const payload = `داده‌های بازار XAUUSD (طلا):
-- قیمت لحظه‌ای: ${closes.split(', ').pop()} دلار
+  const payload = `داده‌های بازار ${cfg.fa} (${symbol}):
+- قیمت لحظه‌ای: ${closes.split(', ').pop()}
 - RSI(14): ${indicators.rsi}
-- MACD: ${indicators.macd} / سیگنال: ${indicators.macdSignal} (هیستوگرام: ${(indicators.macd - indicators.macdSignal).toFixed(3)})
+- MACD: ${indicators.macd} / سیگنال: ${indicators.macdSignal} (هیستوگرام: ${(indicators.macd - indicators.macdSignal).toFixed(cfg.decimals > 2 ? 6 : 3)})
 - EMA9: ${indicators.ema9} / EMA21: ${indicators.ema21} (روند: ${indicators.trend === 'UP' ? 'صعودی' : indicators.trend === 'DOWN' ? 'نزولی' : 'خنثی'})
 - ATR(14): ${indicators.atr}
 - کارایی روند KER: ${indicators.ker} (${indicators.ker < 0.15 ? 'بازار چرخشی/بی‌رون' : indicators.ker > 0.3 ? 'بازار جهت‌دار' : 'نرمال'})
@@ -50,7 +51,7 @@ export async function analyzeMarket(candles: Candle[]): Promise<AIVerdict & { in
   const zai = await getZAI()
   const completion = await zai.chat.completions.create({
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: SYSTEM_PROMPT(symbol, cfg.fa) },
       { role: 'user', content: payload },
     ],
     temperature: 0.45,

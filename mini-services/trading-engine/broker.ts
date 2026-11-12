@@ -22,8 +22,6 @@ export interface AccountResult {
   error?: string
 }
 
-const SYMBOL = 'XAUUSD'
-
 function apiBase(region: string) {
   return `https://mt-client-api-v1.${region}.agiliumtrade.ai`
 }
@@ -67,26 +65,40 @@ export async function mt5Open(
   settings: BotSettings,
   direction: Direction,
   comment: string,
+  symbol = 'XAUUSD',
 ): Promise<OpenResult> {
   try {
     // fetch current price
-    const priceRes = await metaApiFetch(settings, `/users/current/accounts/${settings.metaapiAccountId}/symbol/${SYMBOL}/price`)
+    const priceRes = await metaApiFetch(settings, `/users/current/accounts/${settings.metaapiAccountId}/symbol/${symbol}/price`)
     if (!priceRes.ok) return { ok: false, error: persianApiError(priceRes.status, await priceRes.text()) }
     const priceJson: any = await priceRes.json()
     const openPrice = direction === 'BUY' ? Number(priceJson.ask) : Number(priceJson.bid)
     if (!openPrice) return { ok: false, error: 'قیمت نماد از سرور دریافت نشد' }
 
-    const sl = direction === 'BUY' ? openPrice - settings.slPips * PIP : openPrice + settings.slPips * PIP
-    const tp = direction === 'BUY' ? openPrice + settings.tpPips * PIP : openPrice - settings.tpPips * PIP
+    // SL/TP: pip-based for gold (pip = 0.1), percent-based for other symbols
+    let sl: number
+    let tp: number
+    if (symbol === 'XAUUSD') {
+      sl = direction === 'BUY' ? openPrice - settings.slPips * PIP : openPrice + settings.slPips * PIP
+      tp = direction === 'BUY' ? openPrice + settings.tpPips * PIP : openPrice - settings.tpPips * PIP
+      sl = +sl.toFixed(2)
+      tp = +tp.toFixed(2)
+    } else {
+      const slFrac = symbol === 'BTCUSD' ? 0.0015 : 0.0008
+      sl = direction === 'BUY' ? openPrice * (1 - slFrac) : openPrice * (1 + slFrac)
+      tp = direction === 'BUY' ? openPrice * (1 + slFrac * 2) : openPrice * (1 - slFrac * 2)
+      sl = +sl.toPrecision(6)
+      tp = +tp.toPrecision(6)
+    }
 
     const openRes = await metaApiFetch(settings, `/users/current/accounts/${settings.metaapiAccountId}/positions`, {
       method: 'POST',
       body: JSON.stringify({
         actionType: direction === 'BUY' ? 'ORDER_TYPE_BUY' : 'ORDER_TYPE_SELL',
-        symbol: SYMBOL,
+        symbol,
         volume: settings.mt5Lots,
-        stopLoss: +sl.toFixed(2),
-        takeProfit: +tp.toFixed(2),
+        stopLoss: sl,
+        takeProfit: tp,
         comment: comment.slice(0, 26),
       }),
     })

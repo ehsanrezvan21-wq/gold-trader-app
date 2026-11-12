@@ -16,8 +16,8 @@ const vazirmatn = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "گلد بات | ربات ترید هوشمند طلا",
-  description: "ربات معامله‌گر خودکار طلا با هوش مصنوعی — اتصال زنده به MT5، سیگنال‌گیری AI و حالت توربو",
+  title: "گلد بات | ربات ترید هوشمند (طلا، بیت‌کوین، یورو)",
+  description: "ربات معامله‌گر خودکار طلا و بیت‌کوین و یورو با هوش مصنوعی — اتصال زنده به MT5، سیگنال‌گیری AI و حالت توربو",
   applicationName: "گلد بات",
   manifest: "/manifest.json",
   appleWebApp: {
