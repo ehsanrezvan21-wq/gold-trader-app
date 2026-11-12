@@ -5,7 +5,7 @@ import type {
   AISignal, BotSettings, BotStats, Candle, FullState, LogEntry, Tick, Trade,
 } from './types'
 import { CandleBuilder, MarketSimulator, PIP, SYMBOLS, computeIndicators, symbolConfig, fmtPx } from './market'
-import { analyzeMarket, localVerdict } from './ai'
+import { analyzeMarket, localVerdict, type RecentContext } from './ai'
 import { demoSettle, mt5Account, mt5Close, mt5Open, mt5Positions } from './broker'
 
 const STATE_FILE = path.join(__dirname, 'state.json')
@@ -31,6 +31,7 @@ export const DEFAULT_SETTINGS: BotSettings = {
   cooldownAfterLossSec: 12,
   maxConsecutiveLosses: 3,
   activeSymbol: 'XAUUSD',
+  autoStakePct: 0,
 }
 
 export function freshStats(): BotStats {
@@ -253,6 +254,35 @@ export class TradingEngine {
   }
 
   // ─── internals ───
+  /** Effective stake for the next demo trade: fixed $ or % of balance (auto sizing). */
+  private currentStake(): number {
+    const pct = this.settings.autoStakePct
+    if (pct > 0) {
+      const auto = +(this.balance * pct / 100).toFixed(2)
+      return Math.min(100, Math.max(1, auto))
+    }
+    return this.settings.stake
+  }
+
+  /** Win-rate (0..1) of this symbol's last closed WIN/LOSS trades — undefined if no data. */
+  private perSymbolAccuracy(symbol: string): number | undefined {
+    const rows = this.trades
+      .filter(t => t.symbol === symbol && t.status === 'closed' && (t.result === 'WIN' || t.result === 'LOSS'))
+      .slice(0, 10)
+    if (rows.length < 3) return undefined
+    const wins = rows.filter(t => t.result === 'WIN').length
+    return wins / rows.length
+  }
+
+  /** Last-10-trades summary of the whole account, for the GLM prompt. */
+  private recentSummary(): RecentContext {
+    const rows = this.trades
+      .filter(t => t.status === 'closed' && (t.result === 'WIN' || t.result === 'LOSS'))
+      .slice(0, 10)
+    const wins = rows.filter(t => t.result === 'WIN').length
+    return { wins, losses: rows.length - wins, streak: this.stats.streak }
+  }
+
   private priceOf(symbol: string): number {
     const t = this.symbolTicks[symbol]
     if (t) return t.price
@@ -350,7 +380,7 @@ export class TradingEngine {
         this.lastGlmTryAt = Date.now()
         try {
           const candles = this.markets[activeSym].b1m.closed.slice(-40)
-          const verdict = await analyzeMarket(candles, activeSym)
+          const verdict = await analyzeMarket(candles, activeSym, this.recentSummary())
           this.rateBackoff = 0
           // If GLM hesitates (HOLD) but technicals clearly lean one way, follow the technical signal
           let final = verdict
@@ -378,7 +408,7 @@ export class TradingEngine {
         if (sym === activeSym && glmRan) continue
         try {
           const candles = this.markets[sym].b1m.closed.slice(-40)
-          const verdict = localVerdict(candles)
+          const verdict = localVerdict(candles, this.perSymbolAccuracy(sym))
           this.applyVerdict(verdict, 'تکنیکال', sym)
         } catch (e: any) {
           this.log('error', `خطای تحلیل تکنیکال ${symbolConfig(sym).fa}: ${e?.message || 'نامشخص'}`)
@@ -452,7 +482,7 @@ export class TradingEngine {
     }
     const openCount = this.trades.filter(t => t.status === 'open').length
     if (openCount >= this.settings.maxConcurrent) return { ok: false, reason: 'ظرفیت معاملات همزمان تکمیل است' }
-    if (this.settings.mode === 'demo' && this.balance < this.settings.stake) {
+    if (this.settings.mode === 'demo' && this.balance < this.currentStake()) {
       this.pausedReason = 'موجودی کافی نیست'
       return { ok: false, reason: this.pausedReason }
     }
@@ -477,7 +507,9 @@ export class TradingEngine {
     }
 
     if (this.settings.mode === 'demo') {
-      const trade: Trade = { ...base, mode: 'demo', stake: this.settings.stake, lots: 0, openPrice: this.priceOf(symbol) }
+      const stake = this.currentStake()
+      if (stake > this.balance) return { ok: false, reason: 'موجودی کافی نیست' }
+      const trade: Trade = { ...base, mode: 'demo', stake, lots: 0, openPrice: this.priceOf(symbol) }
       this.trades.unshift(trade)
       if (this.trades.length > MAX_HISTORY) this.trades.pop()
       this.save()

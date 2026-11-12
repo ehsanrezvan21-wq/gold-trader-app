@@ -8,6 +8,14 @@ export interface AIVerdict {
   reason: string
 }
 
+/** Recent account performance, fed back to the AI so it adapts to its own track record. */
+export interface RecentContext {
+  wins: number
+  losses: number
+  /** current streak: +n wins / -n losses */
+  streak: number
+}
+
 let zaiInstance: any = null
 async function getZAI() {
   if (!zaiInstance) {
@@ -31,11 +39,28 @@ const SYSTEM_PROMPT = (symbol: string, fa: string) => `تو یک تحلیل‌گ
 - confidence: ست‌آپ قوی = ۷۵ تا ۹۵، ست‌آپ متوسط = ۶۲ تا ۷۵، مردد = ۵۰ تا ۶۲.
 - reason باید حداکثر ۱۲ کلمه باشد و به ذکر حداقل یکی از اندیکاتورها بپردازد.`
 
-export async function analyzeMarket(candles: Candle[], symbol = 'XAUUSD'): Promise<AIVerdict & { indicators: ReturnType<typeof computeIndicators> }> {
+export async function analyzeMarket(
+  candles: Candle[],
+  symbol = 'XAUUSD',
+  recent?: RecentContext,
+): Promise<AIVerdict & { indicators: ReturnType<typeof computeIndicators> }> {
   const indicators = computeIndicators(candles)
   const cfg = symbolConfig(symbol)
-  const recent = candles.slice(-24)
-  const closes = recent.map(c => c.c.toFixed(cfg.decimals)).join(', ')
+  const recentCandles = candles.slice(-24)
+  const closes = recentCandles.map(c => c.c.toFixed(cfg.decimals)).join(', ')
+
+  // adaptive line: the analyst knows how the bot has been doing lately
+  let recentLine = ''
+  if (recent && recent.wins + recent.losses > 0) {
+    const total = recent.wins + recent.losses
+    const acc = Math.round((recent.wins / total) * 100)
+    const streakTxt = recent.streak >= 2
+      ? `${recent.streak} برد پیاپی — اعتماد به نفس منطقی است`
+      : recent.streak <= -2
+        ? `${Math.abs(recent.streak)} باخت پیاپی — محتاط‌تر باش و فقط قوی‌ترین ست‌آپ‌ها را بگیر`
+        : 'عملکرد متعادل'
+    recentLine = `\nعملکرد اخیر ربات روی این حساب: ${recent.wins}برد / ${recent.losses}باخت (دقت ${acc}٪). ${streakTxt}.`
+  }
 
   const payload = `داده‌های بازار ${cfg.fa} (${symbol}):
 - قیمت لحظه‌ای: ${closes.split(', ').pop()}
@@ -45,6 +70,7 @@ export async function analyzeMarket(candles: Candle[], symbol = 'XAUUSD'): Promi
 - ATR(14): ${indicators.atr}
 - کارایی روند KER: ${indicators.ker} (${indicators.ker < 0.15 ? 'بازار چرخشی/بی‌رون' : indicators.ker > 0.3 ? 'بازار جهت‌دار' : 'نرمال'})
 - ۲۴ کندل اخیر (close): ${closes}
+${recentLine}
 
 نتیجه تحلیل را فقط به صورت JSON بده.`
 
@@ -62,8 +88,10 @@ export async function analyzeMarket(candles: Candle[], symbol = 'XAUUSD'): Promi
   return { ...parseVerdict(raw), indicators }
 }
 
-/** Local technical-analysis fallback — keeps the bot alive when GLM API is rate-limited/offline. */
-export function localVerdict(candles: Candle[]): AIVerdict & { indicators: ReturnType<typeof computeIndicators> } {
+/** Local technical-analysis fallback — keeps the bot alive when GLM API is rate-limited/offline.
+ *  `recentAccuracy`: win-rate (0..1) of this symbol's last trades; the verdict confidence
+ *  shifts up/down a few points so a cold symbol trades less and a hot symbol trades more. */
+export function localVerdict(candles: Candle[], recentAccuracy?: number): AIVerdict & { indicators: ReturnType<typeof computeIndicators> } {
   const indicators = computeIndicators(candles)
   let score = 0
   const reasons: string[] = []
@@ -103,8 +131,12 @@ export function localVerdict(candles: Candle[]): AIVerdict & { indicators: Retur
     ? 40 + Math.abs(score) * 5
     : Math.min(88, 58 + Math.abs(score) * 7 + (indicators.rsi <= 30 || indicators.rsi >= 70 ? 6 : 0))
   // efficient market boost / choppy market damping
-  const conf = choppy ? Math.min(base, 55) : indicators.ker > 0.3 ? base + 4 : base
-  const confidence = Math.round(conf)
+  let conf = choppy ? Math.min(base, 55) : indicators.ker > 0.3 ? base + 4 : base
+  // adaptive nudge from the symbol's own recent track record (±4 points max)
+  if (typeof recentAccuracy === 'number' && action !== 'HOLD') {
+    conf += Math.max(-4, Math.min(4, Math.round((recentAccuracy - 0.5) * 8)))
+  }
+  const confidence = Math.max(0, Math.min(95, Math.round(conf)))
 
   const prefix = action === 'BUY' ? 'احتمال صعود — ' : action === 'SELL' ? 'احتمال نزول — ' : action === 'HOLD' && choppy ? 'بازار بی‌رون است — ' : 'سیگنال مبهم — '
   const reason = prefix + (reasons.length ? reasons.slice(0, 2).join(' و ') : 'تشخیص تکنیکال')

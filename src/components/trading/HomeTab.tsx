@@ -1,11 +1,11 @@
 'use client'
 
-import type { FullState, Tick } from '@/lib/trading-types'
+import type { BotSettings, FullState, Tick } from '@/lib/trading-types'
 import { SYMBOL_LIST, SYMBOL_META, fmtPx, symbolFa } from '@/lib/trading-types'
 import { CandleChart } from './CandleChart'
 import { ConfidenceRing } from './ConfidenceRing'
 import { MarketScanner } from './MarketScanner'
-import { TrendingUp, TrendingDown, Minus, Clock, Flame, Hand } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, Clock, Flame, Hand, Globe } from 'lucide-react'
 
 export function fmtMoney(n: number, sign = false) {
   const abs = Math.abs(n)
@@ -16,6 +16,25 @@ export function fmtMoney(n: number, sign = false) {
 
 export function pnlClass(n: number) {
   return n > 0 ? 'text-[#35c98e]' : n < 0 ? 'text-[#f4536b]' : 'text-stone-400'
+}
+
+/** Label of the effective stake: fixed $, auto % of balance, or lots for MT5. */
+export function stakeLabel(s: BotSettings, balance: number): string {
+  if (s.mode === 'mt5') return `${s.mt5Lots} لات`
+  if (s.autoStakePct > 0) {
+    const auto = Math.max(1, Math.min(100, +(balance * s.autoStakePct / 100).toFixed(2)))
+    return `خودکار ~$${auto}`
+  }
+  return `$${s.stake}`
+}
+
+/** Current FX trading session from UTC time — affects expected volatility. */
+export function tradingSession(ms = Date.now()): { name: string; vol: string; cls: string } {
+  const h = new Date(ms).getUTCHours()
+  if (h >= 12 && h < 16) return { name: 'لندن + نیویورک', vol: 'نوسان خیلی بالا', cls: 'text-[#f5b52a]' }
+  if (h >= 7 && h < 12) return { name: 'سشن لندن', vol: 'نوسان بالا', cls: 'text-[#35c98e]' }
+  if (h >= 16 && h < 21) return { name: 'سشن نیویورک', vol: 'نوسان متوسط', cls: 'text-[#35c98e]' }
+  return { name: 'سشن آسیا', vol: 'نوسان کم', cls: 'text-[#a89d8d]' }
 }
 
 function SymbolChip({ symbol, tick, active, onSelect }: { symbol: string; tick: Tick | null; active: boolean; onSelect: (s: string) => void }) {
@@ -57,6 +76,7 @@ export function HomeTab({ state, tick, now, onManualTrade, onSetSymbol }: {
   const lastSig = state.signals.find(s => s.indicators) // latest signal of any market
   const activeSymbol = state.settings.activeSymbol
   const capacityFull = open.length >= state.settings.maxConcurrent
+  const sess = tradingSession(now)
 
   return (
     <div className="space-y-3">
@@ -110,6 +130,9 @@ export function HomeTab({ state, tick, now, onManualTrade, onSetSymbol }: {
             <div className="flex items-center gap-2">
               <span className="text-sm font-bold" dir="ltr">{activeSymbol}</span>
               <span className="rounded-md bg-[#f5b52a]/15 px-1.5 py-0.5 text-[10px] font-bold text-[#f5b52a]">{symbolFa(activeSymbol)}</span>
+              <span className={`flex items-center gap-1 rounded-md bg-black/30 px-1.5 py-0.5 text-[10px] font-bold ${sess.cls}`}>
+                <Globe className="h-3 w-3" /> {sess.name}
+              </span>
             </div>
             <div className="mt-1 flex items-baseline gap-2">
               <span className="text-2xl font-black tabular-nums" dir="ltr">{tick ? fmtPx(activeSymbol, tick.price) : '—'}</span>
@@ -166,7 +189,7 @@ export function HomeTab({ state, tick, now, onManualTrade, onSetSymbol }: {
             <Hand className="h-4 w-4 text-[#f5b52a]" />
             <h2 className="text-sm font-bold">معامله دستی — {symbolFa(activeSymbol)}</h2>
           </div>
-          <span className="text-[10px] text-[#a89d8d] tabular-nums">حجم: {state.settings.mode === 'demo' ? `$${state.settings.stake}` : `${state.settings.mt5Lots} لات`}</span>
+          <span className="text-[10px] text-[#a89d8d] tabular-nums">حجم: {stakeLabel(state.settings, state.balance)}</span>
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2">
           <button

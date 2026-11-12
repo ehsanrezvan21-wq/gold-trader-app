@@ -28,6 +28,8 @@ export interface BotSettings {
   maxConsecutiveLosses: number
   /** symbol currently shown in the UI & targeted by GLM analysis + manual trades */
   activeSymbol: string
+  /** auto position sizing: stake = this % of balance (0 = fixed stake) */
+  autoStakePct: number
 }
 
 export interface Trade {

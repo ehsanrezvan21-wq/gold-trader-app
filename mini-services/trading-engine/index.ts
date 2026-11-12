@@ -43,6 +43,7 @@ io.on('connection', socket => {
     try {
       const safe: Partial<BotSettings> = {}
       if (patch.stake !== undefined) safe.stake = Math.max(1, Math.min(1000, Number(patch.stake)))
+      if (patch.autoStakePct !== undefined) safe.autoStakePct = Math.max(0, Math.min(100, Math.round(Number(patch.autoStakePct) || 0)))
       if (patch.payout !== undefined) safe.payout = Math.max(1, Math.min(10, Number(patch.payout)))
       if (patch.minConfidence !== undefined) safe.minConfidence = Math.max(0, Math.min(100, Number(patch.minConfidence)))
       if (patch.maxConcurrent !== undefined) safe.maxConcurrent = Math.max(1, Math.min(10, Number(patch.maxConcurrent)))

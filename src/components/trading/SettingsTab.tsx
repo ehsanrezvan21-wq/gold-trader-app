@@ -36,7 +36,9 @@ export function SettingsTab({
             <div>
               <div className="flex justify-between">
                 <Label className="text-xs">حجم هر معامله (دلار)</Label>
-                <span className="text-xs font-bold text-[#f5b52a] tabular-nums">${s.stake}</span>
+                <span className="text-xs font-bold text-[#f5b52a] tabular-nums">
+                  {s.autoStakePct > 0 ? `خودکار ~$${Math.max(1, Math.min(100, +(state.balance * s.autoStakePct / 100).toFixed(2)))}` : `$${s.stake}`}
+                </span>
               </div>
               <Slider
                 className="mt-2"
@@ -44,9 +46,39 @@ export function SettingsTab({
                 min={1}
                 max={100}
                 step={1}
+                disabled={s.autoStakePct > 0}
                 onValueChange={([v]) => onPatch({ stake: v })}
                 aria-label="حجم هر معامله"
               />
+              {/* auto position sizing (compounding) */}
+              <div className="mt-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">حجم خودکار (درصد از موجودی)</Label>
+                  <span className="text-[10px] text-[#a89d8d]">ترکیب سود در حجم</span>
+                </div>
+                <div className="mt-1.5 grid grid-cols-5 gap-1.5" role="group" aria-label="حجم خودکار">
+                  {[0, 5, 10, 20, 30].map(pct => (
+                    <button
+                      key={pct}
+                      onClick={() => onPatch({ autoStakePct: pct })}
+                      aria-pressed={s.autoStakePct === pct}
+                      className={`rounded-lg border py-1.5 text-[11px] font-bold transition-colors ${
+                        s.autoStakePct === pct
+                          ? 'border-[#f5b52a] bg-[#f5b52a]/10 text-[#f5b52a]'
+                          : 'border-border bg-black/30 text-stone-300 active:bg-black/50'
+                      }`}
+                    >
+                      {pct === 0 ? 'خاموش' : `${pct}٪`}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-[10px] text-[#a89d8d]">
+                  {s.autoStakePct > 0
+                    ? `هر معامله ${s.autoStakePct}٪ موجودی فعلی است (بین $1 تا $100) — با رشد حساب، حجم هم رشد می‌کند`
+                    : 'خاموش = حجم ثابت اسلایدر بالا'
+                  }
+                </p>
+              </div>
               <p className="mt-1 text-[10px] text-[#a89d8d]">در حالت MT5 واقعی، حجم با لات تنظیم می‌شود؛ این مقدار مبنای ریسک دمو است.</p>
             </div>
           ) : null}

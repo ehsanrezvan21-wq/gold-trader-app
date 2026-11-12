@@ -3,6 +3,7 @@
 import type { FullState } from '@/lib/trading-types'
 import { symbolFa } from '@/lib/trading-types'
 import { ConfidenceRing } from './ConfidenceRing'
+import { stakeLabel } from './HomeTab'
 import { TrendingUp, TrendingDown, Minus, Power, Zap, ScrollText } from 'lucide-react'
 
 const DURATIONS = [30, 45, 60] as const
@@ -54,7 +55,7 @@ export function BotTab({
         <div className="mt-4 grid grid-cols-3 gap-2 text-center">
           <div className="rounded-xl bg-black/30 p-2">
             <div className="text-[10px] text-[#a89d8d]">حجم هر معامله</div>
-            <div className="text-sm font-bold tabular-nums">{state.settings.mode === 'demo' ? `$${state.settings.stake}` : `${state.settings.mt5Lots} لات`}</div>
+            <div className="text-sm font-bold tabular-nums">{stakeLabel(state.settings, state.balance)}</div>
           </div>
           <div className="rounded-xl bg-black/30 p-2">
             <div className="text-[10px] text-[#a89d8d]">معاملات باز</div>
