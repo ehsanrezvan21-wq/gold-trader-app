@@ -127,6 +127,14 @@ export interface MT5AccountInfo {
   server: string
 }
 
+/** Result of an explicit "test connection" run from the settings page. */
+export interface MT5TestResult {
+  status: 'idle' | 'testing' | 'success' | 'error'
+  message: string
+  at: number
+  info?: MT5AccountInfo
+}
+
 export interface FullState {
   settings: BotSettings
   balance: number
@@ -144,6 +152,8 @@ export interface FullState {
   mt5: MT5AccountInfo | null
   mt5Status: 'disconnected' | 'connecting' | 'connected' | 'error'
   mt5Error: string | null
+  /** last explicit connection test fired from the settings page */
+  mt5Test: MT5TestResult
 }
 
 // ─── Symbol metadata (mirror of engine SYMBOL_CONFIGS) ───

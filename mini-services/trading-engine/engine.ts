@@ -2,7 +2,7 @@
 import fs from 'fs'
 import path from 'path'
 import type {
-  AISignal, BotSettings, BotStats, Candle, FullState, LogEntry, Tick, Trade,
+  AISignal, BotSettings, BotStats, Candle, FullState, LogEntry, MT5TestResult, Tick, Trade,
 } from './types'
 import { CandleBuilder, MarketSimulator, PIP, SYMBOLS, computeIndicators, symbolConfig, fmtPx } from './market'
 import { analyzeMarket, localVerdict, type RecentContext } from './ai'
@@ -102,6 +102,7 @@ export class TradingEngine {
   mt5: FullState['mt5'] = null
   mt5Status: FullState['mt5Status'] = 'disconnected'
   mt5Error: string | null = null
+  mt5Test: MT5TestResult = { status: 'idle', message: '', at: 0 }
 
   private markets: Record<string, MarketPack> = {}
   private aiBusy = false
@@ -234,6 +235,35 @@ export class TradingEngine {
     } else {
       this.settleDemo(trade, this.priceOf(trade.symbol))
     }
+  }
+
+  /**
+   * Explicit connection test from the settings page: validates the MetaApi
+   * credentials WITHOUT switching the account mode. Result lands in state.mt5Test.
+   */
+  async testMt5() {
+    if (this.mt5Test.status === 'testing') return
+    if (!this.settings.metaapiToken || !this.settings.metaapiAccountId) {
+      this.mt5Test = { status: 'error', message: 'اول توکن و شناسه حساب را در تنظیمات وارد کنید', at: Date.now() }
+      this.onEmit()
+      return
+    }
+    this.mt5Test = { status: 'testing', message: 'در حال بررسی اتصال به MetaApi…', at: Date.now() }
+    this.onEmit()
+    const res = await mt5Account(this.settings)
+    if (res.ok && res.info) {
+      this.mt5Test = {
+        status: 'success',
+        message: `اتصال موفق — ${res.info.broker} / سرور ${res.info.server} • موجودی ${res.info.balance.toFixed(2)} ${res.info.currency}`,
+        at: Date.now(),
+        info: res.info,
+      }
+      this.log('success', `تست اتصال MT5 موفق بود — ${res.info.broker} (${res.info.server})`)
+    } else {
+      this.mt5Test = { status: 'error', message: res.error || 'اتصال ناموفق بود', at: Date.now() }
+      this.log('warn', `تست اتصال MT5 ناموفق: ${res.error || 'نامشخص'}`)
+    }
+    this.onEmit()
   }
 
   /** Manual BUY/SELL from the user, bypassing the AI confidence gate and the post-loss cooldown. */
@@ -466,6 +496,10 @@ export class TradingEngine {
 
   private canOpen(includeCooldown = false): { ok: boolean; reason?: string } {
     if (this.pausedReason) return { ok: false, reason: this.pausedReason }
+    // safety interlock: never send real orders through a dead connection
+    if (this.settings.mode === 'mt5' && this.mt5Status !== 'connected') {
+      return { ok: false, reason: 'اتصال MT5 برقرار نیست — معامله واقعی تا برقراری اتصال متوقف است' }
+    }
     if (this.dayPnl <= -this.settings.dailyLossCap) {
       this.pausedReason = `سقف ضرر روزانه (${this.settings.dailyLossCap}$) لمس شد — بات متوقف است`
       this.settings.botRunning = false
@@ -680,6 +714,7 @@ export class TradingEngine {
       mt5: this.mt5,
       mt5Status: this.settings.mode === 'demo' ? 'disconnected' : this.mt5Status,
       mt5Error: this.mt5Error,
+      mt5Test: this.mt5Test,
     }
   }
 }

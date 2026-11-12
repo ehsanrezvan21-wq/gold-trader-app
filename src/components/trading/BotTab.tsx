@@ -6,7 +6,7 @@ import { ConfidenceRing } from './ConfidenceRing'
 import { stakeLabel } from './HomeTab'
 import { TrendingUp, TrendingDown, Minus, Power, Zap, ScrollText } from 'lucide-react'
 
-const DURATIONS = [30, 45, 60] as const
+const DURATIONS = [15, 30, 45, 60, 90, 120] as const
 
 export function BotTab({
   state,
@@ -93,7 +93,7 @@ export function BotTab({
           ))}
         </div>
         <p className="mt-2 text-[10px] leading-5 text-[#a89d8d]">
-          در حالت توربو، هر معامله به‌صورت خودکار پس از زمان انتخاب‌شده بسته می‌شود. برد = {fmt(state.settings.payout)}× حجم معامله.
+          در حالت توربو، هر معامله به‌صورت خودکار پس از زمان انتخاب‌شده بسته می‌شود. برد = {fmt(state.settings.payout)}× حجم معامله. برای اسکالپ سریع ۱۵ ثانیه و برای حرکت‌های بزرگ‌تر ۹۰ یا ۱۲۰ ثانیه را انتخاب کنید.
         </p>
       </section>
 

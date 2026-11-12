@@ -7,16 +7,18 @@ import { Input } from '@/components/ui/input'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ShieldAlert, Settings2, TriangleAlert, RefreshCcw, PlugZap } from 'lucide-react'
+import { ShieldAlert, Settings2, TriangleAlert, RefreshCcw, PlugZap, Loader2, CheckCircle2, XCircle } from 'lucide-react'
 
 export function SettingsTab({
   state,
   onPatch,
   onReset,
+  onTestMt5,
 }: {
   state: FullState
   onPatch: (p: Partial<BotSettings>) => void
   onReset: () => void
+  onTestMt5: () => void
 }) {
   const s = state.settings
   const [confirmReset, setConfirmReset] = useState(false)
@@ -299,6 +301,22 @@ export function SettingsTab({
                   onChange={e => onPatch({ mt5Lots: Math.max(0.01, Math.min(10, Number(e.target.value) || 0.01)) })}
                   aria-label="حجم لات"
                 />
+                <div className="mt-1.5 grid grid-cols-4 gap-1" role="group" aria-label="پیش‌فرض لات">
+                  {[0.01, 0.02, 0.05, 0.1].map(v => (
+                    <button
+                      key={v}
+                      onClick={() => onPatch({ mt5Lots: v })}
+                      aria-pressed={s.mt5Lots === v}
+                      className={`rounded-lg border py-1.5 text-[11px] font-bold tabular-nums transition-colors ${
+                        s.mt5Lots === v
+                          ? 'border-[#f5b52a] bg-[#f5b52a]/10 text-[#f5b52a]'
+                          : 'border-border bg-black/30 text-stone-300 active:bg-black/50'
+                      }`}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -327,8 +345,43 @@ export function SettingsTab({
                 />
               </div>
             </div>
+            {/* connection test — validates MetaApi credentials without switching mode */}
+            <div>
+              <button
+                onClick={onTestMt5}
+                disabled={state.mt5Test.status === 'testing'}
+                className={`flex w-full items-center justify-center gap-2 rounded-xl py-3 text-xs font-black transition-colors ${
+                  state.mt5Test.status === 'testing'
+                    ? 'bg-[#f5b52a]/10 text-[#f5b52a]'
+                    : 'bg-[#f5b52a] text-[#171310] active:bg-[#e0a41f]'
+                }`}
+                aria-label="تست اتصال به متاتریدر"
+              >
+                {state.mt5Test.status === 'testing'
+                  ? (<><Loader2 className="h-4 w-4 animate-spin" /> در حال تست اتصال…</>)
+                  : (<><PlugZap className="h-4 w-4" /> تست اتصال و دریافت اطلاعات حساب</>)}
+              </button>
+              {state.mt5Test.status === 'success' && (
+                <div className="mt-2 flex items-start gap-2 rounded-xl border border-[#35c98e]/30 bg-[#35c98e]/10 p-3">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#35c98e]" />
+                  <div className="min-w-0 text-[11px] leading-5">
+                    <p className="font-bold text-[#35c98e]">اتصال موفق</p>
+                    <p className="mt-0.5 break-words text-[#c9bda9]">{state.mt5Test.message}</p>
+                  </div>
+                </div>
+              )}
+              {state.mt5Test.status === 'error' && (
+                <div className="mt-2 flex items-start gap-2 rounded-xl border border-[#f4536b]/30 bg-[#f4536b]/10 p-3">
+                  <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#f4536b]" />
+                  <div className="min-w-0 text-[11px] leading-5">
+                    <p className="font-bold text-[#f4536b]">اتصال ناموفق</p>
+                    <p className="mt-0.5 break-words text-[#c9bda9]">{state.mt5Test.message}</p>
+                  </div>
+                </div>
+              )}
+            </div>
             <p className="text-[10px] leading-5 text-[#a89d8d]">
-              برای اتصال واقعی: در سایت metaapi.cloud حساب رایگان بسازید، توکن شخصی و شناسه حساب MT5 خود را اینجا وارد کنید و حساب را در پنل MetaApi مستقر (deploy) کنید.
+              برای اتصال واقعی: در سایت metaapi.cloud حساب رایگان بسازید، توکن شخصی و شناسه حساب MT5 خود را اینجا وارد کنید و حساب را در پنل MetaApi مستقر (deploy) کنید. سپس با دکمه «تست اتصال» صحت اطلاعات را بررسی کنید و در آخر حالت را روی MT5 بگذارید.
             </p>
           </div>
         )}

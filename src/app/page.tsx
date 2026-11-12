@@ -31,6 +31,7 @@ export default function App() {
   const [connected, setConnected] = useState(false)
   const socketRef = useRef<ReturnType<typeof connectEngine> | null>(null)
   const phasesRef = useRef<Map<string, TradePhase>>(new Map())
+  const pausedRef = useRef<string | null>(null)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -97,6 +98,10 @@ export default function App() {
     socketRef.current?.emit('manual-trade', d, symbol)
   }, [])
 
+  const testMt5 = useCallback(() => {
+    socketRef.current?.emit('test-mt5')
+  }, [])
+
   // reconnect watchdog: if the socket drops for a while, re-boot the engine and retry
   useEffect(() => {
     if (connected) return
@@ -144,6 +149,22 @@ export default function App() {
     }
   }, [state, toast])
 
+  // ─── auto-pause watcher: circuit breaker / daily loss cap / emergency stop ───
+  useEffect(() => {
+    if (!state) return
+    const reason = state.pausedReason
+    const before = pausedRef.current
+    if (reason && reason !== before) {
+      try { navigator.vibrate?.([120, 60, 120]) } catch { /* not supported */ }
+      toast({
+        title: 'بات متوقف شد',
+        description: reason,
+        variant: 'destructive',
+      })
+    }
+    pausedRef.current = reason
+  }, [state, toast])
+
   if (!state) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4">
@@ -184,7 +205,7 @@ export default function App() {
         {tab === 'home' && <HomeTab state={state} tick={tick} now={now} onManualTrade={manualTrade} onSetSymbol={setSymbol} />}
         {tab === 'bot' && <BotTab state={state} now={now} onToggleBot={toggleBot} onSetDuration={d => patch({ tradeDurationSec: d })} />}
         {tab === 'trades' && <TradesTab state={state} now={now} onCloseTrade={closeTrade} />}
-        {tab === 'settings' && <SettingsTab state={state} onPatch={patch} onReset={resetAccount} />}
+        {tab === 'settings' && <SettingsTab state={state} onPatch={patch} onReset={resetAccount} onTestMt5={testMt5} />}
       </div>
 
       {/* Bottom nav — Android app style */}

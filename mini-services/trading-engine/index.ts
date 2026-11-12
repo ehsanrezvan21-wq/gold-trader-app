@@ -75,6 +75,7 @@ io.on('connection', socket => {
   })
   socket.on('reset-account', () => engine.resetAccount())
   socket.on('close-trade', (id: string) => engine.closeTradeManually(String(id).slice(0, 40)))
+  socket.on('test-mt5', () => engine.testMt5().catch(() => {}))
   socket.on('get-state', () => socket.emit('state', engine.snapshot()))
 })
 
