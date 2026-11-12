@@ -52,3 +52,12 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# local data & deliverables
+/db/
+/download/
+/upload/
+/tool-results/
+.zscripts
+mini-services/trading-engine/state.json
+mini-services/trading-engine/*.pid
