@@ -1,0 +1,25 @@
+{
+  "name": "Gold Trader App",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/bun:1": {}
+  },
+  "postCreateCommand": "bun install && cd mini-services/trading-engine && bun install",
+  "postStartCommand": "bash .devcontainer/start.sh",
+  "forwardPorts": [3000, 3003],
+  "portsAttributes": {
+    "3000": {
+      "label": "Gold Trader Web App",
+      "onAutoForward": "openBrowser"
+    },
+    "3003": {
+      "label": "Trading Engine (internal)",
+      "onAutoForward": "ignore"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["bradlc.vscode-tailwindcss", "esbenp.prettier-vscode"]
+    }
+  }
+}
