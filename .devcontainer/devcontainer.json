@@ -2,7 +2,7 @@
   "name": "Gold Trader App",
   "image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm",
   "features": {
-    "ghcr.io/devcontainers/features/bun:1": {}
+    "ghcr.io/michidk/devcontainers-features/bun:1": {}
   },
   "postCreateCommand": "bun install && cd mini-services/trading-engine && bun install",
   "postStartCommand": "bash .devcontainer/start.sh",
